@@ -1,0 +1,1609 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reveille — Dawn Generator v5 (strata engine)</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg:#0d0d0f; --panel:#141416; --line:#232327; --line2:#2c2c31;
+    --txt:#e6e6e6; --txt2:#9a9a9f; --txt3:#6a6a70; --accent:#d8d8d8;
+    --good:#5fb87a; --warn:#d8a24e;
+  }
+  html,body{ height:100%; width:100%; overflow:hidden;
+    font-family:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+    font-size:12px; color:var(--txt); background:var(--bg); }
+  body{ display:flex; }
+
+  #stage{ flex:1; position:relative; min-width:0; }
+  #sky{ position:absolute; inset:0; }
+  #grain{ position:absolute; inset:0; opacity:0; pointer-events:none; mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+  .info{ position:absolute; inset:20px; pointer-events:none;
+    color:rgba(255,255,255,.8); font-size:11px; line-height:1.5; letter-spacing:.02em; }
+  .info-tl,.info-tr,.info-tc,.info-ml,.info-mr,.info-bot{ pointer-events:auto; user-select:text; -webkit-user-select:text; cursor:text; }
+  .info-tl{ position:absolute; top:0; left:0; }
+  .info-tc{ position:absolute; top:0; left:50%; transform:translateX(-50%); text-align:center; }
+  .info-tr{ position:absolute; top:0; right:0; }
+  .info-ml{ position:absolute; top:50%; left:0; transform:translateY(-50%); line-height:1.7; }
+  .info-mr{ position:absolute; top:50%; right:0; transform:translateY(-50%); text-align:right; line-height:1.7; }
+  .colon{ display:inline-block; width:0.5em; text-align:center; }
+  @keyframes blink{ 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  .colon.live{ animation:blink 1s step-end infinite; }
+  .info-bot{ position:absolute; bottom:18px; left:0; right:0; display:flex; justify-content:space-between; }
+  .info-note{ position:absolute; bottom:0; left:0; right:0; text-align:center; }
+
+  /* ============================================================
+     LANDING HERO — brand-facing view. Font, layout, ring animation.
+     ============================================================ */
+  /* @font-face for preview. Developer replaces src with the licensed
+     production woff2 for the site. Font family name kept identical
+     so nothing else needs to change. */
+
+  #hero{ display:none; position:absolute; inset:0; pointer-events:none;
+    font-family:'Season VF-TRIAL', ui-sans-serif, system-ui, sans-serif;
+    font-weight:500; font-size:24px; letter-spacing:-0.02em; line-height:1;
+    color:#fff; overflow:hidden; }
+  .landing-hero-mode #hero{ display:block; }
+  .landing-hero-mode .info{ display:none; }
+
+  /* Label and icon are anchored, never centred: 180 + 60 + 32 + 60 = 332px to the
+     left of the 50% line, so the focal city always begins exactly on that line no
+     matter how long its name is. They hold still through a drum turn. */
+  #hero-meta{ position:absolute; left:calc(50% - 332px); top:50%;
+    transform:translateY(-50%);
+    display:flex; align-items:center; gap:60px; white-space:nowrap;
+    opacity:0; transition:opacity 380ms ease-out; }
+  .hero-ready #hero-meta{ opacity:1; }
+  #hero-label{ min-width:180px; text-align:right; transition:opacity 380ms ease-out; }
+  #hero-icon{ width:32px; height:16px; flex-shrink:0; color:#fff; }
+
+  /* The clock is the only thing that steps aside during a turn, because it has to
+     re-anchor to the right of a city name of a different length. */
+  #hero-time{ position:absolute; transform:translateY(-50%); white-space:nowrap;
+    opacity:0; transition:opacity 300ms ease-out; }
+  .hero-ready #hero-time{ opacity:1; }
+
+  /* THE DRUM.
+     #hero-ring is a zero-size pivot at the centre of the circle. All 24 cities,
+     including the focal one, are pinned to it at fixed angles and never move on
+     their own. A turn rotates this single element, so the whole list travels
+     together along the arc. Per-item, only opacity animates, on the identical
+     duration and easing as the rotation: the outgoing city dims from 100 to 30
+     exactly as it reaches the slot below, and the incoming one brightens from 30
+     to 100 exactly as it arrives at the focal slot. */
+  #hero-ring{ position:absolute; width:0; height:0; pointer-events:none;
+    transform-origin:0 0; will-change:transform; }
+  #hero-ring.spin{ transition:transform 900ms cubic-bezier(.33,0,.15,1); }
+  .hero-ring-item{ position:absolute; left:0; top:0;
+    color:#fff; white-space:nowrap; line-height:1; opacity:0;
+    transform-origin:0 0;
+    transition:opacity 900ms cubic-bezier(.33,0,.15,1); }
+  .hero-ring-item.no-anim{ transition:none; }
+  #hero-time .colon-blink{ animation: colon-blink 1s steps(2, start) infinite; }
+  @keyframes colon-blink { 0%,50% { opacity: 1; } 51%,100% { opacity: 0; } }
+
+  #panel{ width:340px; height:100%; background:var(--panel); border-left:1px solid var(--line);
+    padding:16px 16px 28px; overflow-y:auto; flex-shrink:0; }
+  #panel::-webkit-scrollbar{ width:8px; } #panel::-webkit-scrollbar-thumb{ background:#2a2a2f; border-radius:4px; }
+  .head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:14px; }
+  .head .t{ font-size:11px; letter-spacing:.12em; text-transform:uppercase; }
+  .head .v{ font-size:9px; color:var(--txt3); }
+  .group{ margin-bottom:16px; padding-bottom:16px; border-bottom:1px solid var(--line); }
+  .group:last-child{ border-bottom:none; }
+  .group-title{ font-size:9px; text-transform:uppercase; letter-spacing:.16em; color:var(--txt3); margin-bottom:10px; display:flex; justify-content:space-between; }
+  .badge.real{ color:var(--good); } .badge.mock{ color:var(--warn); } .badge.art{ color:#7da7d8; } .badge{ color:var(--txt3); }
+  .row{ margin-bottom:9px; } .row:last-child{ margin-bottom:0; }
+  .row-head{ display:flex; justify-content:space-between; align-items:baseline; margin-bottom:3px; }
+  .row-label{ font-size:11px; } .row-value{ color:var(--txt2); font-size:10px; }
+  .hint{ font-size:9px; color:var(--txt3); line-height:1.4; margin-top:6px; }
+  input[type="range"]{ width:100%; -webkit-appearance:none; appearance:none; height:2px; background:var(--line2); outline:none; cursor:pointer; }
+  input[type="range"]::-webkit-slider-thumb{ -webkit-appearance:none; width:11px; height:11px; background:var(--accent); border-radius:50%; }
+  input[type="range"]::-moz-range-thumb{ width:11px; height:11px; background:var(--accent); border-radius:50%; border:none; }
+  input[type="range"]:disabled::-webkit-slider-thumb{ background:#4a4a4e; }
+  .seg{ display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:3px; }
+  .seg button{ background:#1d1d21; border:1px solid var(--line2); color:var(--txt2); padding:7px 4px; font-size:9px;
+    text-transform:uppercase; letter-spacing:.05em; cursor:pointer; font-family:inherit; }
+  .seg button.active{ background:#34343c; color:#fff; border-color:#4a4a52; }
+  .toggle-row{ display:flex; justify-content:space-between; align-items:center; padding:3px 0; }
+  .toggle{ width:30px; height:16px; background:var(--line2); border-radius:8px; position:relative; cursor:pointer; transition:background .15s; flex-shrink:0; }
+  .toggle::after{ content:''; position:absolute; top:2px; left:2px; width:12px; height:12px; background:#8a8a8f; border-radius:50%; transition:transform .15s,background .15s; }
+  .toggle.on{ background:#4a5a6a; } .toggle.on::after{ background:#fff; transform:translateX(14px); }
+  .btn{ width:100%; background:#1d1d21; color:var(--txt); border:1px solid var(--line2); padding:9px; font-size:10px;
+    cursor:pointer; font-family:inherit; letter-spacing:.06em; text-transform:uppercase; }
+  .btn:hover{ background:#26262b; } .btn.copied{ background:#1f2c22; border-color:#3a5a42; color:#aef0bd; }
+
+  .lb{ font-size:10px; }
+  .lb-row{ display:grid; grid-template-columns:1fr auto auto; gap:6px; align-items:center; padding:6px 7px; border:1px solid transparent; cursor:pointer; border-radius:2px; }
+  .lb-row:hover{ background:#1c1c20; } .lb-row.winner{ background:#20242b; border-color:#34404e; } .lb-row.locked{ border-color:#5a6a4a; }
+  .lb-name .nm{ color:var(--txt); } .lb-name .alt{ color:var(--txt3); font-size:9px; }
+  .lb-strata{ color:var(--txt3); font-size:9px; }
+  .lb-score{ color:var(--txt2); font-variant-numeric:tabular-nums; } .lb-score b{ color:#fff; }
+
+  /* strata ladder readout */
+  .ladder{ display:flex; flex-direction:column; gap:0; border:1px solid var(--line); }
+  .ladder-item{ display:flex; justify-content:space-between; align-items:center; padding:5px 8px; font-size:10px; border-bottom:1px solid var(--line); }
+  .ladder-item:last-child{ border-bottom:none; }
+  .ladder-item.on{ color:var(--txt); } .ladder-item.off{ color:#3e3e44; }
+  .ladder-item .sw{ width:18px; height:10px; border:1px solid #00000040; }
+  .ladder-item.off .sw{ background:#1a1a1e !important; border-style:dashed; }
+  .ladder-item .lbl{ flex:1; margin:0 8px; }
+  .ladder-item .rule{ font-size:8px; color:var(--txt3); }
+
+  .stop-strip{ display:flex; height:10px; margin-top:10px; border:1px solid var(--line); }
+  .stop-strip>div{ flex-shrink:0; }
+  .note{ font-size:9px; color:var(--txt3); line-height:1.5; margin-top:8px; }
+  .play-control.locked{ opacity:.36; pointer-events:none; }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <div id="sky"></div>
+  <div id="cmyk-warning" style="display:none; position:absolute; top:16px; right:16px; z-index:5; background:#f0c419; color:#1a1308; padding:6px 10px; border-radius:3px; font-size:11px; font-weight:600; letter-spacing:.02em; cursor:help; pointer-events:auto; box-shadow:0 2px 8px rgba(0,0,0,.3);" title="Some colors fall outside the standard CMYK print gamut. They may shift when printed offset/digital."><span style="display:inline-block; transform:translateY(-1px); margin-right:5px;">⚠</span><span id="cmyk-warning-text">— out of CMYK</span></div>
+  <div id="grain"></div>
+  <div class="info">
+    <div class="info-tl" id="info-city">—</div>
+    <div class="info-tc" id="info-time">—</div>
+    <div class="info-tr" id="info-coords">—</div>
+    <div class="info-ml" id="info-sun">—</div>
+    <div class="info-mr" id="info-scores">—</div>
+    <div class="info-bot" id="info-strata"></div>
+    <div class="info-note" id="info-flag"></div>
+  </div>
+
+  <!-- Landing Hero overlay (visible only when .landing-hero-mode on #stage) -->
+  <div id="hero">
+    <div id="hero-ring"></div>
+    <div id="hero-meta">
+      <span id="hero-label">First Light</span>
+      <svg id="hero-icon" viewBox="0 0 32 16" xmlns="http://www.w3.org/2000/svg">
+        <path d="M 0 16 A 16 16 0 0 1 32 16 Z" fill="currentColor"/>
+      </svg>
+    </div>
+    <span id="hero-time">, 4:52 am</span>
+  </div>
+</div>
+
+<div id="panel">
+  <div class="head"><div class="t">Reveille · Dawn v5</div><div class="v">strata engine</div></div>
+
+  <div class="group">
+    <div class="group-title"><span>Mode</span></div>
+    <div class="seg" id="uimode-seg">
+      <button data-uimode="real">Real · live API</button>
+      <button data-uimode="override">Override · play</button>
+      <button data-uimode="curated">Brand</button>
+      <button data-uimode="landing-hero" class="active">Landing Hero</button>
+    </div>
+    <div class="hint" id="uimode-hint">Real: the actual best dawn over the financial capitals right now, ticking live. Override unlocks manual play — scrub time, lock a city, fake the weather.</div>
+  </div>
+
+  <div class="group" id="landing-hero-group" style="display:none;">
+    <div class="group-title"><span>Landing Hero</span><span class="badge art">brand · live</span></div>
+    <div class="note" style="margin-bottom:12px; font-size:10px; line-height:1.55;">
+      Ring rotates through 24 financial capitals plus Honolulu. Focal city is whoever is currently at first light. When all markets are between opens, Honolulu takes standing watch. Physics uses high-altitude cloud only, giving the sky its view from above.
+    </div>
+    <button class="btn" id="export-hero-btn">Export standalone HTML</button>
+    <div class="note" style="margin-top:8px; font-size:9px; line-height:1.5;">
+      Self-contained HTML for the site. Font is embedded as base64 (Season VF-TRIAL) with clear replacement instructions inside for the licensed production font.
+    </div>
+    <div class="group-title" style="margin-top:14px; margin-bottom:8px;">Preview controls</div>
+    <button class="btn" id="hero-next-btn">Next city (advance focal)</button>
+    <button class="btn" id="hero-honolulu-btn" style="margin-top:6px;">Jump to Honolulu (Standing Watch)</button>
+    <button class="btn" id="hero-reset-btn" style="margin-top:6px; background:#16161a;">Return to live focal</button>
+    <div class="note" style="margin-top:8px; font-size:9px; line-height:1.5;">
+      Test buttons only. In production the focal advances automatically as astronomical dawn moves through the 24 cities.
+    </div>
+  </div>
+
+  <div class="group" id="palette-group" style="display:none;">
+    <div class="group-title"><span>Brand palette</span><span class="badge art">Reveille</span></div>
+    <div id="palette-grid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:6px; margin-bottom:10px;"></div>
+    <div id="palette-edit" style="display:none;">
+      <div class="row"><div class="row-head"><span class="row-label">Hue shift</span><span class="row-value" id="pe-hue-val">0°</span></div>
+        <input type="range" id="pe-hue" min="-180" max="180" step="1" value="0"></div>
+      <div class="row"><div class="row-head"><span class="row-label">Lightness contrast</span><span class="row-value" id="pe-con-val">1.00</span></div>
+        <input type="range" id="pe-con" min="0.5" max="1.6" step="0.01" value="1.0"></div>
+      <div class="row"><div class="row-head"><span class="row-label">Saturation</span><span class="row-value" id="pe-sat-val">1.00</span></div>
+        <input type="range" id="pe-sat" min="0" max="1.8" step="0.01" value="1.0"></div>
+      <div class="row"><div class="row-head"><span class="row-label">Horizon position</span><span class="row-value" id="pe-pos-val">0%</span></div>
+        <input type="range" id="pe-pos" min="-40" max="40" step="1" value="0"></div>
+      <div class="row"><div class="row-head"><span class="row-label">Lightness offset</span><span class="row-value" id="pe-l-val">0</span></div>
+        <input type="range" id="pe-l" min="-0.20" max="0.20" step="0.01" value="0"></div>
+      <button class="btn" id="pe-reset" style="margin-top:6px;">Reset edits</button>
+    </div>
+    <div class="note">The Reveille Dawn brand gradient in OKLCH. Tune with the sliders below, export via SVG.</div>
+  </div>
+
+  <div class="group play-control" id="time-group">
+    <div class="group-title"><span>Time (UTC)</span><span class="badge real">real geometry</span></div>
+    <div class="row"><div class="row-head"><span class="row-label">Scrub 24h</span><span class="row-value" id="time-val">—</span></div>
+      <input type="range" id="time-slider" min="0" max="1439" step="1" value="900"></div>
+    <div class="toggle-row"><span class="row-label">Live (real UTC)</span><div class="toggle" id="live-toggle"></div></div>
+  </div>
+
+  <!-- CONSTRUCTION LADDER -->
+  <div class="group" id="construction-group">
+    <div class="group-title"><span>Construction — atmospheric strata</span><span class="badge real">deterministic</span></div>
+    <div class="ladder" id="ladder"></div>
+    <div class="hint">Fixed vocabulary of 7 named layers, top→bottom. Each turns on only when a physical threshold is met — so the same rules build 2 colours for overcast or 7 for a clear low sun. Nothing here is random.</div>
+  </div>
+
+
+  <div class="group play-control" id="weights-group">
+    <div class="group-title"><span>Dawn Index — scoring weights</span><span class="badge real">selection</span></div>
+    <div class="row"><div class="row-head"><span class="row-label">Sun altitude</span><span class="row-value" id="w-alt-val">2.0</span></div><input type="range" id="w-alt" min="0" max="3" step="0.1" value="2"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Cloud</span><span class="row-value" id="w-cloud-val">1.0</span></div><input type="range" id="w-cloud" min="0" max="3" step="0.1" value="1"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Aerosol</span><span class="row-value" id="w-aero-val">0.8</span></div><input type="range" id="w-aero" min="0" max="3" step="0.1" value="0.8"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Dryness</span><span class="row-value" id="w-hum-val">0.6</span></div><input type="range" id="w-hum" min="0" max="3" step="0.1" value="0.6"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Visibility</span><span class="row-value" id="w-vis-val">0.6</span></div><input type="range" id="w-vis" min="0" max="3" step="0.1" value="0.6"></div>
+  </div>
+
+  <div class="group" id="leaderboard-group">
+    <div class="group-title"><span>Leaderboard</span><span id="lb-badge" class="badge mock">mock weather</span></div>
+    <div class="lb" id="leaderboard"></div>
+    <button class="btn" id="reroll-btn" style="margin-top:8px;">↻ Reroll mock weather</button>
+    <button class="btn" id="auto-btn" style="margin-top:6px; background:#16161a;">Back to auto (best score)</button>
+    <div class="hint">Number after each city = how many strata its sky resolves into right now. Click to lock.</div>
+  </div>
+
+  <div class="group play-control" id="atm-group">
+    <div class="group-title"><span>Atmosphere — override displayed city</span><span class="badge mock">mock</span></div>
+    <div class="toggle-row" style="margin-bottom:8px;"><span class="row-label">Override (tune)</span><div class="toggle" id="atm-toggle"></div></div>
+    <div class="row"><div class="row-head"><span class="row-label">Cloud cover</span><span class="row-value" id="cloud-val">30%</span></div><input type="range" id="cloud-slider" min="0" max="100" value="30" disabled></div>
+    <div class="row"><div class="row-head"><span class="row-label">Humidity</span><span class="row-value" id="humidity-val">55%</span></div><input type="range" id="humidity-slider" min="0" max="100" value="55" disabled></div>
+    <div class="row"><div class="row-head"><span class="row-label">Visibility</span><span class="row-value" id="visibility-val">20 km</span></div><input type="range" id="visibility-slider" min="1" max="50" value="20" disabled></div>
+    <div class="row"><div class="row-head"><span class="row-label">Aerosol (AQI)</span><span class="row-value" id="aqi-val">40</span></div><input type="range" id="aqi-slider" min="0" max="300" value="40" disabled></div>
+    <div class="hint">Drag these to watch strata switch on/off live — proof the structure is condition-driven, not fixed.</div>
+  </div>
+
+  <div class="group play-control" id="treatment-group">
+    <div class="group-title"><span>Treatment</span><span class="badge art">brand grade · not physics</span></div>
+    <div class="seg" id="palette-seg" style="margin-bottom:10px;">
+      <button data-palette="auto" class="active">Auto</button>
+      <button data-palette="warm">Warm</button>
+      <button data-palette="cool">Cool</button>
+      <button data-palette="mono">Mono</button>
+    </div>
+    <div class="row"><div class="row-head"><span class="row-label">Vibrance</span><span class="row-value" id="vib-val">1.10</span></div><input type="range" id="vib-slider" min="0" max="2" step="0.05" value="1.1"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Warmth</span><span class="row-value" id="warm-val">0.0</span></div><input type="range" id="warm-slider" min="-1" max="1" step="0.05" value="0"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Contrast</span><span class="row-value" id="con-val">0.15</span></div><input type="range" id="con-slider" min="-0.5" max="1" step="0.05" value="0.15"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Grain overlay</span><span class="row-value" id="grain-val">0%</span></div><input type="range" id="grain-slider" min="0" max="40" value="0"></div>
+  </div>
+
+  <div class="group" id="export-group">
+    <div class="group-title"><span>Export</span><span class="badge art">Figma-safe</span></div>
+    <div class="row"><div class="row-head"><span class="row-label">Stop density</span><span class="row-value" id="stops-val">64</span></div><input type="range" id="stops-slider" min="16" max="128" step="8" value="64"></div>
+    <div class="stop-strip" id="stop-strip"></div>
+    <button class="btn" id="copy-svg-btn" style="margin-top:10px;">Copy SVG (paste into Figma)</button>
+    <button class="btn" id="download-svg-btn" style="margin-top:6px;">Download SVG</button>
+    <div class="note">2–7 physical anchors are interpolated in OKLCH and baked into <span id="stops-note">64</span> sRGB stops — dense output survives Figma's interpolation, variable anchor count keeps each sky structurally distinct.</div>
+  </div>
+
+  <div class="group" id="loop-group">
+    <div class="group-title"><span>Export loop (WebM)</span><span class="badge art">video</span></div>
+    <button class="btn" id="loop-play-btn" style="margin-bottom:10px;">▶ Play loop on main screen</button>
+    <div class="row"><div class="row-head"><span class="row-label">Gradient frames (24h samples)</span><span class="row-value" id="loop-gc-val">50</span></div>
+      <input type="range" id="loop-gc" min="2" max="100" step="1" value="50"></div>
+    <div class="row"><div class="row-head"><span class="row-label">Frame rate</span><span class="row-value" id="loop-fps-val">30 fps</span></div>
+      <div class="seg" id="loop-fps-seg">
+        <button data-fps="24">24</button>
+        <button data-fps="30" class="active">30</button>
+        <button data-fps="60">60</button>
+      </div>
+    </div>
+    <div class="row"><div class="row-head"><span class="row-label">Duration</span><span class="row-value" id="loop-dur-val">12 s</span></div>
+      <input type="range" id="loop-dur" min="2" max="60" step="1" value="12"></div>
+    <div class="row" style="opacity:.7;"><div class="row-head"><span class="row-label">Total frames</span><span class="row-value" id="loop-frames-val">360</span></div></div>
+    <div class="row"><div class="row-head"><span class="row-label">Aspect</span><span class="row-value" id="loop-ar-val">16:9</span></div>
+      <div class="seg" id="loop-ar-seg">
+        <button data-ar="16:9" class="active">16:9</button>
+        <button data-ar="9:16">9:16</button>
+        <button data-ar="1:1">1:1</button>
+        <button data-ar="2:3">2:3</button>
+      </div>
+    </div>
+    <div class="row"><div class="row-head"><span class="row-label">Resolution (short side)</span><span class="row-value" id="loop-res-val">1080</span></div>
+      <div class="seg" id="loop-res-seg">
+        <button data-res="1080" class="active">1080</button>
+        <button data-res="1440">1440</button>
+        <button data-res="2160">2160</button>
+      </div>
+    </div>
+    <div class="row" style="opacity:.7;"><div class="row-head"><span class="row-label">Output size</span><span class="row-value" id="loop-size-val">1920×1080</span></div></div>
+    <button class="btn" id="loop-export-btn" style="margin-top:10px;">Export loop</button>
+    <div class="note">Loop captures N gradients evenly across 24h, then cross-fades between them in OKLCH. Few gradients + long duration = slow morph. Many + short = fast cycling. Seamless: last cross-fades back to first.</div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  CITIES
+// ============================================================
+const CITIES = [
+  { name:'Sydney',lat:-33.8688,lng:151.2093,tz:'Australia/Sydney',financial:true,profile:{cloud:15,humidity:60,visibility:28,aqi:25}},
+  { name:'Tokyo',lat:35.6762,lng:139.6503,tz:'Asia/Tokyo',financial:true,profile:{cloud:20,humidity:65,visibility:18,aqi:50}},
+  { name:'Seoul',lat:37.5665,lng:126.9780,tz:'Asia/Seoul',financial:true,profile:{cloud:22,humidity:62,visibility:16,aqi:70}},
+  { name:'Shanghai',lat:31.2304,lng:121.4737,tz:'Asia/Shanghai',financial:true,profile:{cloud:24,humidity:72,visibility:12,aqi:95}},
+  { name:'Hong Kong',lat:22.3193,lng:114.1694,tz:'Asia/Hong_Kong',financial:true,profile:{cloud:26,humidity:78,visibility:12,aqi:80}},
+  { name:'Singapore',lat:1.3521,lng:103.8198,tz:'Asia/Singapore',financial:true,profile:{cloud:30,humidity:85,visibility:14,aqi:55}},
+  { name:'Mumbai',lat:19.0760,lng:72.8777,tz:'Asia/Kolkata',financial:true,profile:{cloud:25,humidity:78,visibility:9,aqi:165}},
+  { name:'Dubai',lat:25.2048,lng:55.2708,tz:'Asia/Dubai',financial:true,profile:{cloud:8,humidity:45,visibility:22,aqi:95}},
+  { name:'Johannesburg',lat:-26.2041,lng:28.0473,tz:'Africa/Johannesburg',financial:true,profile:{cloud:15,humidity:50,visibility:30,aqi:45}},
+  { name:'Vienna',lat:48.2082,lng:16.3738,tz:'Europe/Vienna',financial:true,profile:{cloud:22,humidity:62,visibility:24,aqi:30}},
+  { name:'Frankfurt',lat:50.1109,lng:8.6821,tz:'Europe/Berlin',financial:true,profile:{cloud:25,humidity:65,visibility:22,aqi:35}},
+  { name:'Milan',lat:45.4642,lng:9.1900,tz:'Europe/Rome',financial:true,profile:{cloud:22,humidity:64,visibility:16,aqi:75}},
+  { name:'Zurich',lat:47.3769,lng:8.5417,tz:'Europe/Zurich',financial:true,profile:{cloud:18,humidity:58,visibility:30,aqi:25}},
+  { name:'Geneva',lat:46.2044,lng:6.1432,tz:'Europe/Zurich',financial:true,profile:{cloud:16,humidity:55,visibility:32,aqi:22}},
+  { name:'Stockholm',lat:59.3293,lng:18.0686,tz:'Europe/Stockholm',financial:true,profile:{cloud:25,humidity:70,visibility:28,aqi:20}},
+  { name:'Amsterdam',lat:52.3676,lng:4.9041,tz:'Europe/Amsterdam',financial:true,profile:{cloud:28,humidity:75,visibility:18,aqi:32}},
+  { name:'London',lat:51.5074,lng:-0.1278,tz:'Europe/London',financial:true,profile:{cloud:28,humidity:72,visibility:16,aqi:40}},
+  { name:'São Paulo',lat:-23.5505,lng:-46.6333,tz:'America/Sao_Paulo',financial:true,profile:{cloud:22,humidity:70,visibility:15,aqi:58}},
+  { name:'New York',lat:40.7128,lng:-74.0060,tz:'America/New_York',financial:true,profile:{cloud:20,humidity:62,visibility:18,aqi:48}},
+  { name:'Toronto',lat:43.6532,lng:-79.3832,tz:'America/Toronto',financial:true,profile:{cloud:22,humidity:65,visibility:22,aqi:32}},
+  { name:'Chicago',lat:41.8781,lng:-87.6298,tz:'America/Chicago',financial:true,profile:{cloud:20,humidity:60,visibility:22,aqi:38}},
+  { name:'Mexico City',lat:19.4326,lng:-99.1332,tz:'America/Mexico_City',financial:true,profile:{cloud:16,humidity:48,visibility:14,aqi:90}},
+  { name:'San Francisco',lat:37.7749,lng:-122.4194,tz:'America/Los_Angeles',financial:true,profile:{cloud:22,humidity:72,visibility:22,aqi:28}},
+  { name:'Honolulu',lat:21.3069,lng:-157.8583,tz:'Pacific/Honolulu',financial:false,profile:{cloud:15,humidity:68,visibility:34,aqi:15}}
+];
+const ALT_MIN=-9, ALT_MAX=12;
+
+// Fixed astronomical cascade order (east → west, following dawn's daily march around the earth).
+// Order stable throughout the year. Used by Landing Hero to place cities on the ring.
+const CASCADE = [
+  'Tokyo', 'Seoul', 'Sydney', 'Shanghai', 'Hong Kong', 'Singapore',
+  'Mumbai', 'Dubai', 'Stockholm', 'Vienna', 'Frankfurt', 'Amsterdam',
+  'Zurich', 'Milan', 'Geneva', 'London', 'Johannesburg', 'São Paulo',
+  'New York', 'Toronto', 'Chicago', 'Mexico City', 'San Francisco', 'Honolulu'
+];
+
+// ============================================================
+//  SOLAR POSITION — REAL (~0.5–1°)
+// ============================================================
+const rad=d=>d*Math.PI/180, deg=r=>r*180/Math.PI, julianDate=d=>d.getTime()/86400000+2440587.5;
+function sunGeom(date,lat,lng){
+  const n=julianDate(date)-2451545.0;
+  let L=(280.460+0.9856474*n)%360; if(L<0)L+=360;
+  let g=(357.528+0.9856003*n)%360; if(g<0)g+=360;
+  const lambda=L+1.915*Math.sin(rad(g))+0.020*Math.sin(rad(2*g)), eps=23.439-0.0000004*n;
+  const ra=deg(Math.atan2(Math.cos(rad(eps))*Math.sin(rad(lambda)),Math.cos(rad(lambda))));
+  const dec=deg(Math.asin(Math.sin(rad(eps))*Math.sin(rad(lambda))));
+  let GMST=(280.46061837+360.98564736629*n)%360; if(GMST<0)GMST+=360;
+  let LST=(GMST+lng)%360; if(LST<0)LST+=360;
+  let HA=LST-ra; if(HA>180)HA-=360; if(HA<-180)HA+=360;
+  const alt=deg(Math.asin(Math.sin(rad(lat))*Math.sin(rad(dec))+Math.cos(rad(lat))*Math.cos(rad(dec))*Math.cos(rad(HA))));
+  return { alt, rising: HA<0 };   // HA<0 = sun east of meridian = rising = DAWN; HA>0 = setting = DUSK
+}
+function sunAltitude(date,lat,lng){ return sunGeom(date,lat,lng).alt; }
+function dawnPhase(a){ if(a<-18)return'Night'; if(a<-12)return'Astronomical twilight'; if(a<-6)return'Nautical twilight';
+  if(a<-0.83)return'Civil twilight'; if(a<2)return'Sunrise'; if(a<6)return'Early morning'; if(a<10)return'Morning'; return'Day'; }
+
+// ============================================================
+//  COLOUR HELPERS + OKLCH
+// ============================================================
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t, smooth=t=>t*t*(3-2*t);
+function lerpHue(a,b,t){ const d=((b-a+540)%360)-180; return (a+d*t+360)%360; }
+function oklchToRgb(Lin,Cin,Hd){
+  const h=Hd*Math.PI/180, a=Cin*Math.cos(h), b=Cin*Math.sin(h);
+  let l_=Lin+0.3963377774*a+0.2158037573*b, m_=Lin-0.1055613458*a-0.0638541728*b, s_=Lin-0.0894841775*a-1.2914855480*b;
+  l_=l_*l_*l_; m_=m_*m_*m_; s_=s_*s_*s_;
+  let r=4.0767416621*l_-3.3077115913*m_+0.2309699292*s_;
+  let g=-1.2684380046*l_+2.6097574011*m_-0.3413193965*s_;
+  let bb=-0.0041960863*l_-0.7034186147*m_+1.7076147010*s_;
+  const toS=c=>{c=clamp(c,0,1);return c<=0.0031308?12.92*c:1.055*Math.pow(c,1/2.4)-0.055;};
+  return [Math.round(toS(r)*255),Math.round(toS(g)*255),Math.round(toS(bb)*255)];
+}
+const hex=([r,g,b])=>'#'+[r,g,b].map(v=>clamp(v,0,255).toString(16).padStart(2,'0')).join('');
+
+// ============================================================
+//  STRATA ENGINE — deterministic. Fixed ladder, variable presence.
+//  Returns the PRESENT anchors (2..7), ordered top→bottom.
+// ============================================================
+const STRATA_DEFS = [
+  { key:'zenith',  label:'Zenith',          rule:'Always' },
+  { key:'upper',   label:'Upper sky',       rule:'Cloud < 70%' },
+  { key:'wedge',   label:'Twilight wedge',  rule:'Sun < 4°, clear, clean' },
+  { key:'belt',    label:'Belt of Venus',   rule:'Sun −6…+6°, particles, not overcast' },
+  { key:'warm',    label:'Warm band',       rule:'Cloud < 85%' },
+  { key:'aerosol', label:'Aerosol layer',   rule:'AQI > 90 or vis < 12 km' },
+  { key:'haze',    label:'Haze cap',        rule:'Vis < 16 km or humidity > 72%' },
+  { key:'horizon', label:'Horizon',         rule:'Always' }
+];
+
+function assembleAnchors(alt, atm){
+  const c01=atm.cloud/100, h01=atm.humidity/100, a01=Math.min(1,atm.aqi/200);
+  const haze=clamp(1-atm.visibility/40,0,1);
+  const altT=clamp((alt-ALT_MIN)/(ALT_MAX-ALT_MIN),0,1);
+  const brt=lerp(0,0.16,smooth(altT));
+  const sat=(1-0.30*h01)*(1-0.35*haze);
+  let cloudMul=c01<=0.6?1+0.35*Math.max(0,1-Math.abs(c01-0.30)/0.30):1-0.55*((c01-0.6)/0.4);
+  cloudMul=clamp(cloudMul,0.25,1.4);
+  const warmShift=a01*9+haze*6, horizDark=a01*0.10, horizLift=haze*0.10;
+
+  const overcast=atm.cloud>70, heavy=atm.cloud>85, clearish=atm.cloud<55,
+        lowSun=alt<4, smoggy=atm.aqi>90, hazy=(atm.visibility<16||atm.humidity>72);
+
+  const present={};
+  const A=[];
+  const add=(key,pos,L,C,H)=>{ present[key]=true; A.push({key,pos,L:clamp(L,0.05,0.97),C:clamp(C*sat,0,0.30),H:((H%360)+360)%360}); };
+
+  add('zenith', 0.00, 0.46+brt*1.3-(overcast?0.03:0), overcast?0.025:0.085, overcast?250:256);
+  if(!overcast) add('upper', 0.34, 0.60+brt, 0.075, 262);
+  if(lowSun && clearish && !smoggy) add('wedge', 0.50, 0.66+brt*0.7, 0.045, 286);
+  if(alt>-6 && alt<6 && !overcast && (atm.aqi>20 || (atm.cloud>=10 && atm.cloud<=60)))
+    add('belt', 0.63, 0.76+brt*0.6, 0.085*cloudMul*(1+0.40*a01), 338);
+  if(!heavy) add('warm', 0.78, 0.74+brt*0.5+horizLift-horizDark, 0.110*cloudMul*(1+0.20*a01), 32-warmShift);
+  if(smoggy || atm.visibility<12) add('aerosol', 0.88, 0.66+horizLift-horizDark*1.4, 0.070*(1+0.30*a01), 26-warmShift);
+  if(hazy) add('haze', 0.93, 0.72+brt*0.3+horizLift, 0.050*(1-0.45*haze), 64-warmShift*0.6);
+  add('horizon', 1.00, overcast?0.60+brt*0.2:0.72+brt*0.3+horizLift-horizDark, overcast?0.030:(hazy?0.045:0.070), overcast?72:70-warmShift*0.6);
+
+  // Pre-dawn night: the deeper the sun is below the band, the darker the sky (so −26° reads as night, not dawn).
+  const nightF=clamp((ALT_MIN-alt)/21,0,1); // 0 at −9°, 1 at ~−30°
+  if(nightF>0){ for(const q of A){ q.L=lerp(q.L, q.L*0.20, nightF); q.C*=1-0.65*nightF; q.H=lerpHue(q.H,250,0.5*nightF); } }
+
+  return { anchors:A, present };
+}
+
+// Loop variant: fixed-structure anchors with smooth presence weights — no anchor pop-in/out, no luminance jumps.
+function smoothstep(a,b,x){ const t=clamp((x-a)/(b-a),0,1); return t*t*(3-2*t); }
+function assembleAnchorsSmooth(alt, atm){
+  const c01=atm.cloud/100, h01=atm.humidity/100, a01=Math.min(1,atm.aqi/200);
+  const haze=clamp(1-atm.visibility/40,0,1);
+  const altT=clamp((alt-ALT_MIN)/(ALT_MAX-ALT_MIN),0,1);
+  const brt=lerp(0,0.16,smooth(altT));
+  const sat=(1-0.30*h01)*(1-0.35*haze);
+  let cloudMul=c01<=0.6?1+0.35*Math.max(0,1-Math.abs(c01-0.30)/0.30):1-0.55*((c01-0.6)/0.4);
+  cloudMul=clamp(cloudMul,0.25,1.4);
+  const warmShift=a01*9+haze*6, horizDark=a01*0.10, horizLift=haze*0.10;
+
+  // Smooth gates over wide bands (replace hard if-thresholds)
+  const overcastW = smoothstep(60, 80, atm.cloud);
+  const heavyW    = smoothstep(75, 92, atm.cloud);
+  const clearW    = 1 - smoothstep(45, 62, atm.cloud);
+  const lowSunW   = 1 - smoothstep(0, 8, alt);
+  const smogW     = smoothstep(75, 105, atm.aqi);
+  const hazyW     = Math.max(1-smoothstep(12, 20, atm.visibility), smoothstep(64, 78, atm.humidity));
+  const beltAltW  = smoothstep(-10, -4, alt) * (1 - smoothstep(4, 10, alt));
+  const beltCloudW= Math.max(smoothstep(6, 14, atm.cloud) * (1 - smoothstep(56, 66, atm.cloud)), smoothstep(12, 28, atm.aqi));
+  const beltW     = beltAltW * (1 - overcastW) * beltCloudW;
+  const wedgeW    = lowSunW * clearW * (1 - smogW);
+  const aerosolW  = Math.max(smogW, 1-smoothstep(10, 16, atm.visibility));
+
+  // Always-present endpoints with smooth overcast/hazy modulation
+  const zenithL = lerp(0.46+brt*1.3, 0.46+brt*1.3-0.03, overcastW);
+  const zenithC = lerp(0.085, 0.025, overcastW);
+  const zenithH = lerp(256, 250, overcastW);
+
+  const horizonL_clear    = 0.72+brt*0.3+horizLift-horizDark;
+  const horizonL_overcast = 0.60+brt*0.2;
+  const horizonL = lerp(horizonL_clear, horizonL_overcast, overcastW);
+  const horizonC = lerp(lerp(0.070, 0.045, hazyW), 0.030, overcastW);
+  const horizonH = lerp(70-warmShift*0.6, 72, overcastW);
+
+  // Baseline at any position: linear interp of zenith→horizon
+  const baseLine = p => ({ L:lerp(zenithL,horizonL,p), C:lerp(zenithC,horizonC,p)*sat, H:lerpHue(zenithH,horizonH,p) });
+  const fade = (pos, aL, aC, aH, w) => { const b=baseLine(pos);
+    return { pos, L:lerp(b.L, clamp(aL,0.05,0.97), w), C:lerp(b.C, clamp(aC*sat,0,0.30), w), H:lerpHue(b.H, ((aH%360)+360)%360, w) };
+  };
+
+  const A=[];
+  A.push({pos:0.00, L:clamp(zenithL,0.05,0.97), C:clamp(zenithC*sat,0,0.30), H:((zenithH%360)+360)%360, key:'zenith'});
+  A.push(fade(0.34, 0.60+brt, 0.075, 262, 1-overcastW));
+  A.push(fade(0.50, 0.66+brt*0.7, 0.045, 286, wedgeW));
+  A.push(fade(0.63, 0.76+brt*0.6, 0.085*cloudMul*(1+0.40*a01), 338, beltW));
+  A.push(fade(0.78, 0.74+brt*0.5+horizLift-horizDark, 0.110*cloudMul*(1+0.20*a01), 32-warmShift, 1-heavyW));
+  A.push(fade(0.88, 0.66+horizLift-horizDark*1.4, 0.070*(1+0.30*a01), 26-warmShift, aerosolW));
+  A.push(fade(0.93, 0.72+brt*0.3+horizLift, 0.050*(1-0.45*haze), 64-warmShift*0.6, hazyW));
+  A.push({pos:1.00, L:clamp(horizonL,0.05,0.97), C:clamp(horizonC*sat,0,0.30), H:((horizonH%360)+360)%360, key:'horizon'});
+
+  const nightF=clamp((ALT_MIN-alt)/21,0,1);
+  if(nightF>0){ for(const q of A){ q.L=lerp(q.L, q.L*0.20, nightF); q.C*=1-0.65*nightF; q.H=lerpHue(q.H,250,0.5*nightF); } }
+  return { anchors:A };
+}
+function buildStopsSmooth(alt, atm, tr, N){
+  const cps=assembleAnchorsSmooth(alt,atm).anchors;
+  const out=[];
+  for(let i=0;i<N;i++){
+    const t=N===1?0:i/(N-1);
+    let s=0; while(s<cps.length-2 && t>cps[s+1].pos) s++;
+    const a=cps[s], b=cps[s+1];
+    const f=b.pos===a.pos?0:smooth(clamp((t-a.pos)/(b.pos-a.pos),0,1));
+    let L=lerp(a.L,b.L,f), C=lerp(a.C,b.C,f), H=lerpHue(a.H,b.H,f);
+    [L,C,H]=applyTreatment(L,C,H,tr);
+    out.push({ pos:t*100, color:hex(oklchToRgb(L,C,H)) });
+  }
+  return out;
+}
+
+// Sample present anchors densely into sRGB stops
+function applyTreatment(L,C,H,tr){
+  if(tr.palette==='warm'){ H=lerpHue(H,50,0.18); C*=1.12; }
+  else if(tr.palette==='cool'){ H=lerpHue(H,255,0.16); C*=0.85; }
+  else if(tr.palette==='mono'){ C*=0.05; }
+  C*=tr.vibrance;
+  if(tr.warmth>0) H=lerpHue(H,55,0.16*tr.warmth);
+  if(tr.warmth<0) H=lerpHue(H,250,0.16*(-tr.warmth));
+  L=clamp((L-0.5)*(1+tr.contrast)+0.5,0,0.99); C=clamp(C,0,0.32);
+  return [L,C,(H%360+360)%360];
+}
+function buildStops(alt, atm, tr, N){
+  const cps=assembleAnchors(alt,atm).anchors;
+  const out=[];
+  for(let i=0;i<N;i++){
+    const t=N===1?0:i/(N-1);
+    let s=0; while(s<cps.length-2 && t>cps[s+1].pos) s++;
+    const a=cps[s], b=cps[s+1];
+    const f=b.pos===a.pos?0:smooth(clamp((t-a.pos)/(b.pos-a.pos),0,1));
+    let L=lerp(a.L,b.L,f), C=lerp(a.C,b.C,f), H=lerpHue(a.H,b.H,f);
+    [L,C,H]=applyTreatment(L,C,H,tr);
+    out.push({ pos:t*100, color:hex(oklchToRgb(L,C,H)) });
+  }
+  return out;
+}
+
+// 36 curated palettes. Each = sorted array of {pos:0..100, L, C, H} stops in OKLCH.
+// Pink hue range 320–355 deliberately avoided. Indigo / cobalt / petrol up top;
+// brass / amber / ochre / wheat down bottom. Some inverted (warm top, cool bottom).
+const PALETTES = [
+  { name:'Reveille Dawn', stops:[
+    {pos:0,   L:.640, C:.069, H:262},
+    {pos:12,  L:.695, C:.063, H:261},
+    {pos:24,  L:.745, C:.055, H:260},
+    {pos:36,  L:.795, C:.045, H:259},
+    {pos:46,  L:.840, C:.028, H:257},
+    {pos:55,  L:.875, C:.013, H:255},
+    {pos:62,  L:.900, C:.004, H:260},
+    {pos:68,  L:.915, C:.010, H:80},
+    {pos:73,  L:.918, C:.022, H:77},
+    {pos:78,  L:.910, C:.040, H:75},
+    {pos:84,  L:.880, C:.065, H:68},
+    {pos:89,  L:.845, C:.082, H:58},
+    {pos:93,  L:.795, C:.088, H:45},
+    {pos:97,  L:.715, C:.085, H:35},
+    {pos:100, L:.650, C:.078, H:28}
+  ]}
+];
+
+window.PALETTE_IDX = null;
+window.PALETTE_EDIT = { hueShift:0, lContrast:1.0, chromaScale:1.0, posBias:0, lOffset:0 };
+
+// ---------- CMYK gamut approximation (US Web Coated SWOP v2 envelope) ----------
+const CMYK_CHROMA_CEIL = [0.16,0.17,0.18,0.20,0.18,0.17,0.15,0.14,0.14,0.15,0.18,0.17];  // hue 0°,30°,...,330°
+function cmykMaxC(H){
+  H = ((H%360)+360)%360;
+  const i = Math.floor(H/30), n = (i+1)%12, f = (H - i*30)/30;
+  return CMYK_CHROMA_CEIL[i] + (CMYK_CHROMA_CEIL[n]-CMYK_CHROMA_CEIL[i])*f;
+}
+function isOutOfCMYK(L, C, H){
+  const lFactor = L < 0.10 ? L/0.10 : (L > 0.92 ? Math.max(0, (1-L)/0.08) : 1);
+  return C > cmykMaxC(H) * lFactor + 0.005;
+}
+function updateCmykWarning(lchStops){
+  const w = document.getElementById('cmyk-warning');
+  if(!lchStops || !lchStops.length){ w.style.display='none'; return; }
+  let oog=0;
+  for(const s of lchStops) if(isOutOfCMYK(s.L, s.C, s.H)) oog++;
+  if(oog===0){ w.style.display='none'; return; }
+  const pct = Math.round(oog/lchStops.length*100);
+  document.getElementById('cmyk-warning-text').textContent = `${pct}% out of CMYK`;
+  w.style.display='';
+}
+
+// Non-destructive edits applied on top of the chosen palette's stops.
+function editStops(rawStops){
+  const e = window.PALETTE_EDIT;
+  return rawStops.map(s=>{
+    // Position bias: shift the transition toward top (neg) or bottom (pos). 0..100 axis.
+    // Use a power-curve remap so endpoints stay fixed.
+    let pos = s.pos;
+    if(e.posBias){
+      const t = pos/100;
+      const p = e.posBias < 0
+        ? Math.pow(t, 1 + Math.abs(e.posBias)/30)        // pull middle upward
+        : 1 - Math.pow(1-t, 1 + e.posBias/30);            // push middle downward
+      pos = p*100;
+    }
+    // Lightness: pivot at 0.5 for contrast, then offset
+    const L = clamp((s.L - 0.5)*e.lContrast + 0.5 + e.lOffset, 0.02, 0.98);
+    const C = clamp(s.C * e.chromaScale, 0, 0.30);
+    const H = ((s.H + e.hueShift) % 360 + 360) % 360;
+    return { pos, L, C, H };
+  });
+}
+function buildStopsFromPalette(palette, tr, N){
+  const cps = editStops(palette.stops).map(s=>({pos:s.pos/100, L:s.L, C:s.C, H:s.H}));
+  const out=[];
+  for(let i=0;i<N;i++){
+    const t=N===1?0:i/(N-1);
+    let s=0; while(s<cps.length-2 && t>cps[s+1].pos) s++;
+    const a=cps[s], b=cps[s+1];
+    const f=b.pos===a.pos?0:smooth(clamp((t-a.pos)/(b.pos-a.pos),0,1));
+    let L=lerp(a.L,b.L,f), C=lerp(a.C,b.C,f), H=lerpHue(a.H,b.H,f);
+    [L,C,H]=applyTreatment(L,C,H,tr);
+    out.push({ pos:t*100, color:hex(oklchToRgb(L,C,H)) });
+  }
+  return out;
+}
+function buildStopsFromPaletteLCH(palette, tr, N){
+  const cps = editStops(palette.stops).map(s=>({pos:s.pos/100, L:s.L, C:s.C, H:s.H}));
+  const out=[];
+  for(let i=0;i<N;i++){
+    const t=N===1?0:i/(N-1);
+    let s=0; while(s<cps.length-2 && t>cps[s+1].pos) s++;
+    const a=cps[s], b=cps[s+1];
+    const f=b.pos===a.pos?0:smooth(clamp((t-a.pos)/(b.pos-a.pos),0,1));
+    let L=lerp(a.L,b.L,f), C=lerp(a.C,b.C,f), H=lerpHue(a.H,b.H,f);
+    [L,C,H]=applyTreatment(L,C,H,tr);
+    out.push({ pos:t*100, L, C, H });
+  }
+  return out;
+}
+
+
+function buildStopsLCH(alt, atm, tr, N){
+  const cps=assembleAnchors(alt,atm).anchors;
+  const out=[];
+  for(let i=0;i<N;i++){
+    const t=N===1?0:i/(N-1);
+    let s=0; while(s<cps.length-2 && t>cps[s+1].pos) s++;
+    const a=cps[s], b=cps[s+1];
+    const f=b.pos===a.pos?0:smooth(clamp((t-a.pos)/(b.pos-a.pos),0,1));
+    let L=lerp(a.L,b.L,f), C=lerp(a.C,b.C,f), H=lerpHue(a.H,b.H,f);
+    [L,C,H]=applyTreatment(L,C,H,tr);
+    out.push({ pos:t*100, L, C, H });
+  }
+  return out;
+}
+
+// ============================================================
+//  DAWN INDEX
+// ============================================================
+function subScores(alt,atm){
+  const sAlt=Math.exp(-Math.pow((alt-0.5)/5,2));
+  let sCloud=clamp(1-Math.abs(atm.cloud-30)/40,0,1); if(atm.cloud>70)sCloud*=0.30;
+  const sAero=clamp(1-Math.abs(atm.aqi-50)/120,0,1), sHum=clamp(1-atm.humidity/100,0,1), sVis=clamp(atm.visibility/40,0,1);
+  return {alt:sAlt,cloud:sCloud,aero:sAero,hum:sHum,vis:sVis};
+}
+function dawnIndex(alt,atm,w,rising,financial){
+  if(!rising || alt<ALT_MIN || alt>ALT_MAX) return {total:0,eligible:false,s:subScores(alt,atm)};
+  const s=subScores(alt,atm), wsum=w.alt+w.cloud+w.aero+w.hum+w.vis||1;
+  const base=(w.alt*s.alt+w.cloud*s.cloud+w.aero*s.aero+w.hum*s.hum+w.vis*s.vis)/wsum*100;
+  return {total: base + (financial?FIN_BONUS:0), eligible:true, s};
+}
+
+// ============================================================
+//  MOCK WEATHER (seeded) — drop-in replace with Open-Meteo
+// ============================================================
+function hashStr(str){ let h=2166136261; for(let i=0;i<str.length;i++){h^=str.charCodeAt(i);h=Math.imul(h,16777619);} return (h>>>0)/4294967295; }
+function mockWeather(c,seed){ const r=k=>hashStr(c.name+'|'+k+'|'+seed), p=c.profile; return {
+  cloud:clamp(Math.round(p.cloud+(r('c')*2-1)*32),0,100),
+  humidity:clamp(Math.round(p.humidity+(r('h')*2-1)*20),0,100),
+  visibility:clamp(Math.round(p.visibility+(r('v')*2-1)*14),1,50),
+  aqi:clamp(Math.round(p.aqi+(r('a')*2-1)*45),0,300) }; }
+
+// ============================================================
+//  LIVE WEATHER — Open-Meteo (free, CORS, no key)
+//  Two endpoints: forecast (cloud/humidity/vis) + air-quality (us_aqi)
+//  Fetches ALL cities in one call (comma-separated coords).
+//  Cache 10 min. Fallback to mock on error.
+// ============================================================
+let weatherCache={ data:{}, ts:0, live:false };
+
+async function fetchWeatherAll(){
+  try{
+    const lat=CITIES.map(c=>c.lat).join(','), lng=CITIES.map(c=>c.lng).join(',');
+    const [fc,aq]=await Promise.all([
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=cloud_cover_high,relative_humidity_2m,visibility`).then(r=>r.json()),
+      fetch(`https://air-quality-api.open-meteo.com/v1/air-quality?latitude=${lat}&longitude=${lng}&current=us_aqi`).then(r=>r.json())
+    ]);
+    const F=Array.isArray(fc)?fc:[fc], A=Array.isArray(aq)?aq:[aq];
+    const data={};
+    CITIES.forEach((c,i)=>{
+      data[c.name]={
+        cloud:    F[i]?.current?.cloud_cover_high ?? c.profile.cloud,
+        humidity: F[i]?.current?.relative_humidity_2m ?? c.profile.humidity,
+        visibility: Math.round((F[i]?.current?.visibility ?? c.profile.visibility*1000)/1000),
+        aqi:      A[i]?.current?.us_aqi ?? c.profile.aqi
+      };
+    });
+    weatherCache={ data, ts:Date.now(), live:true };
+    render();
+  }catch(e){
+    console.warn('Weather fetch failed, using mock:',e);
+    weatherCache.live=false;
+  }
+}
+
+function getWeather(city){
+  if(weatherCache.live && weatherCache.data[city.name]) return weatherCache.data[city.name];
+  return mockWeather(city,state.mockSeed);
+}
+
+// ============================================================
+//  STATE
+// ============================================================
+const state={ uiMode:'real', liveMode:false, timeMinutes:900, mockSeed:1, pool:'fin', lockedCity:null,
+  weights:{alt:2,cloud:1,aero:0.8,hum:0.6,vis:0.6}, atmOverride:false, ovr:{cloud:30,humidity:55,visibility:20,aqi:40},
+  treatment:{palette:'auto',vibrance:1.1,warmth:0,contrast:0.15}, grain:0, stops:64 };
+let liveTimer=null, lastWinner=null, lastAtm=null, lastAlt=null, lastPreview=null;
+
+function getActiveDate(){ if(state.liveMode)return new Date(); const n=new Date();
+  return new Date(Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate(),Math.floor(state.timeMinutes/60),state.timeMinutes%60,0)); }
+const fmtTime=m=>`${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`;
+const fmtAlt=a=>(a>=0?'+':'−')+Math.abs(a).toFixed(1)+'°';
+const fmtLocal=(d,tz)=>{try{return d.toLocaleTimeString('en-GB',{timeZone:tz,hour:'2-digit',minute:'2-digit',hour12:false});}catch(e){return'—';}};
+const fmtDur=m=>{ const h=Math.floor(m/60), mm=m%60; return h>0?`${h} h ${mm} m`:`${mm} m`; };
+// Timezone abbreviations (Intl returns GMT+offset for most non-US zones). DST-aware: [standard, daylight].
+const TZ_ABBR={
+ 'Australia/Sydney':['AEST','AEDT'],'Asia/Tokyo':'JST','Asia/Seoul':'KST','Asia/Shanghai':'CST',
+ 'Asia/Hong_Kong':'HKT','Asia/Singapore':'SGT','Asia/Kolkata':'IST','Asia/Dubai':'GST','Africa/Johannesburg':'SAST',
+ 'Europe/Vienna':['CET','CEST'],'Europe/Berlin':['CET','CEST'],'Europe/Rome':['CET','CEST'],'Europe/Zurich':['CET','CEST'],
+ 'Europe/Amsterdam':['CET','CEST'],'Europe/Stockholm':['CET','CEST'],'Europe/London':['GMT','BST'],
+ 'America/Sao_Paulo':'BRT','America/New_York':['EST','EDT'],'America/Toronto':['EST','EDT'],
+ 'America/Chicago':['CST','CDT'],'America/Mexico_City':'CST','America/Los_Angeles':['PST','PDT'],
+ 'Pacific/Honolulu':'HST','Atlantic/Reykjavik':'GMT','Pacific/Auckland':['NZST','NZDT']};
+function tzOffMin(d,tz){ const l=new Date(d.toLocaleString('en-US',{timeZone:tz})); const u=new Date(d.toLocaleString('en-US',{timeZone:'UTC'})); return Math.round((l-u)/60000); }
+function tzAbbrev(d,tz){ const a=TZ_ABBR[tz]; if(!a)return''; if(typeof a==='string')return a;
+  const y=d.getUTCFullYear(), std=Math.min(tzOffMin(new Date(Date.UTC(y,0,1)),tz),tzOffMin(new Date(Date.UTC(y,6,1)),tz));
+  return tzOffMin(d,tz)>std?a[1]:a[0]; }
+const FIN_BONUS=10;            // financial cities win on comparable weather, lose to a clearly prettier dawn
+const activePool=()=> CITIES;  // one pool — all cities; selection leans financial via the bonus above
+
+function rankCities(date){
+  return activePool().map(c=>{
+    const g=sunGeom(date,c.lat,c.lng), atm=getWeather(c);
+    const idx=dawnIndex(g.alt,atm,state.weights,g.rising,c.financial);
+    const n=assembleAnchors(g.alt,atm).anchors.length;
+    return {city:c,alt:g.alt,rising:g.rising,atm,strata:n,...idx};
+  }).sort((a,b)=>b.total-a.total);
+}
+
+// A weight slider is shown only if moving it would change the WINNER (the dawn actually displayed).
+function winnerName(date,w){
+  let b=null;
+  for(const c of CITIES){const g=sunGeom(date,c.lat,c.lng),a=getWeather(c),i=dawnIndex(g.alt,a,w,g.rising,c.financial);
+    if(i.eligible && (!b||i.total>b.t)) b={n:c.name,t:i.total};}
+  return b?b.n:null;
+}
+function eligibleCount(date){let n=0;for(const c of CITIES){const g=sunGeom(date,c.lat,c.lng);if(g.rising&&g.alt>=ALT_MIN&&g.alt<=ALT_MAX)n++;}return n;}
+function activeWeightKeys(date,offPeak){
+  if(offPeak || eligibleCount(date)<2) return [];          // nothing to reorder
+  const keys=[];
+  for(const k of ['alt','cloud','aero','hum','vis']){
+    const seen=new Set();
+    for(const v of [0,0.5,1,1.5,2,3]) seen.add(winnerName(date,{...state.weights,[k]:v}));
+    if(seen.size>1) keys.push(k);                          // this weight can swap the displayed city
+  }
+  return keys;
+}
+function applyWeightVisibility(date,offPeak){
+  const active=activeWeightKeys(date,offPeak); let any=false;
+  for(const k of ['alt','cloud','aero','hum','vis']){
+    const show=active.includes(k); document.getElementById('w-'+k).closest('.row').style.display=show?'':'none'; if(show)any=true;
+  }
+  document.getElementById('weights-group').style.display=any?'':'none';
+}
+
+function nextDawn(fromDate){
+  for(let m=5;m<=1440;m+=5){
+    const d=new Date(fromDate.getTime()+m*60000);
+    for(const c of activePool()){
+      const g=sunGeom(d,c.lat,c.lng);
+      if(g.rising && g.alt>=-2 && g.alt<=6) return {city:c,date:d,inMin:m};
+    }
+  }
+  return null;
+}
+let noDawn=null; // {city,date,inMin} when nobody is at dawn now, else null
+
+function render(){
+  if(window.LOOP && window.LOOP.playing) return;   // loop playback owns the sky
+
+  // Curated palette short-circuit: bypass physics, paint the chosen palette directly.
+  if(window.PALETTE_IDX != null){
+    const neutralTr = {palette:'auto', vibrance:1, warmth:0, contrast:0};
+    const stops = buildStopsFromPalette(PALETTES[window.PALETTE_IDX], neutralTr, state.stops);
+    const lchStops = buildStopsFromPaletteLCH(PALETTES[window.PALETTE_IDX], neutralTr, state.stops);
+    document.getElementById('sky').style.background='linear-gradient(to bottom,'+stops.map(s=>`${s.color} ${s.pos.toFixed(2)}%`).join(',')+')';
+    document.getElementById('grain').style.opacity=(state.grain/100).toFixed(2);
+    lastWinner={city:{name:PALETTES[window.PALETTE_IDX].name,lat:0,lng:0,tz:'UTC'},atm:{cloud:0,humidity:0,visibility:0,aqi:0},alt:0,total:0,s:{alt:0,cloud:0,aero:0,hum:0,vis:0}};
+    lastAtm=null; lastAlt=null; lastPreview=null;
+    document.getElementById('info-city').textContent=PALETTES[window.PALETTE_IDX].name+' · curated';
+    document.getElementById('info-sun').innerHTML='';
+    document.getElementById('info-scores').innerHTML='';
+    document.getElementById('info-strata').innerHTML='';
+    document.getElementById('info-flag').textContent='Curated palette — not derived from astronomy or weather.';
+    document.getElementById('ladder').innerHTML='';
+    document.getElementById('stop-strip').innerHTML=stops.map(s=>`<div style="flex:1;background:${s.color}"></div>`).join('');
+    updateCmykWarning(lchStops);
+    return;
+  }
+
+  const date=getActiveDate();
+  const rows=rankCities(date);
+  let win=state.lockedCity?(rows.find(r=>r.city.name===state.lockedCity)||rows[0]):rows[0];
+
+  // Landing Hero mode: fixed cascade order, focal = city currently closest to peak dawn.
+  // Ring shows all 24 cities positioned by offset from focal.
+  if(state.uiMode === 'landing-hero'){
+    let focalCity = null;
+    if(HERO.overrideFocalIdx != null){
+      const cityName = CASCADE[HERO.overrideFocalIdx];
+      focalCity = CITIES.find(x => x.name === cityName);
+    } else {
+      let bestScore = Infinity;
+      for(const cityName of CASCADE){
+        const c = CITIES.find(x => x.name === cityName);
+        if(!c) continue;
+        const g = sunGeom(date, c.lat, c.lng);
+        const score = g.rising ? Math.abs(g.alt - 0.5) : 200 + Math.abs(g.alt - 0.5);
+        if(score < bestScore){ bestScore = score; focalCity = c; }
+      }
+    }
+    const winRow = rows.find(r => r.city.name === focalCity.name);
+    win = winRow || { city:focalCity, alt:sunGeom(date, focalCity.lat, focalCity.lng).alt, atm:getWeather(focalCity), rising:true, eligible:true, total:0, s:{alt:0,cloud:0,aero:0,hum:0,vis:0} };
+    updateLandingHero(date, focalCity);
+  }
+  const tr=state.treatment, N=state.stops;
+  const offPeak = !state.lockedCity && !win.eligible;   // no financial capital at a prime dawn
+  if(state.uiMode !== 'landing-hero'){
+    applyWeightVisibility(date, offPeak);                 // show a weight slider only when it reorders the current dawn
+  }
+  const DAWN_ALT = 0.5;                                  // peak-dawn altitude used for the "next dawn" preview
+  if(offPeak){
+    // No capital is at dawn now → preview the NEXT capital's dawn, rendered at its sunrise moment.
+    noDawn=nextDawn(date);
+    const nextCity = noDawn ? noDawn.city : null;
+    win = (nextCity && rows.find(r=>r.city.name===nextCity.name)) ||
+          rows.filter(r=>r.rising).sort((a,b)=>Math.abs(a.alt-0.5)-Math.abs(b.alt-0.5))[0] || rows[0];
+    lastPreview = noDawn ? noDawn.date : null;
+  } else { noDawn=null; lastPreview=null; }
+  let atm=state.atmOverride?{...state.ovr}:win.atm;
+  const renderAlt = offPeak ? DAWN_ALT : win.alt;       // always render a real dawn, never darkness
+
+  {
+    const stops=buildStops(renderAlt,atm,tr,N);
+    const lchStops=buildStopsLCH(renderAlt,atm,tr,N);
+    document.getElementById('sky').style.background='linear-gradient(to bottom,'+stops.map(s=>`${s.color} ${s.pos.toFixed(2)}%`).join(',')+')';
+    document.getElementById('grain').style.opacity=(state.grain/100).toFixed(2);
+    updateCmykWarning(lchStops);
+    lastWinner=win; lastAtm=atm; lastAlt=renderAlt;
+    const asm=assembleAnchors(renderAlt,atm);
+    document.getElementById('info-city').textContent=win.city.name+(state.lockedCity?' · locked':'');
+    document.getElementById('info-sun').innerHTML=`Sun altitude<br>${fmtAlt(renderAlt)}<br>(${dawnPhase(renderAlt)})`;
+    if(offPeak){
+      document.getElementById('info-scores').innerHTML = `Next dawn<br>${win.city.name}` +
+        (noDawn ? `<br>sunrise ${fmtLocal(noDawn.date,win.city.tz)}<br>in ${fmtDur(noDawn.inMin)}` : '');
+    } else {
+      document.getElementById('info-scores').innerHTML=`Dawn index ${win.total.toFixed(0)}<br>Alt ${(win.s.alt*100|0)}<br>Cloud ${(win.s.cloud*100|0)}<br>Aero ${(win.s.aero*100|0)}<br>Dry ${(win.s.hum*100|0)}<br>Vis ${(win.s.vis*100|0)}`;
+    }
+    const strataNames=[`${asm.anchors.length} strata`,...asm.anchors.map(a=>STRATA_DEFS.find(d=>d.key===a.key).label)];
+    document.getElementById('info-strata').innerHTML=strataNames.map(s=>`<span>${s}</span>`).join('');
+    document.getElementById('info-flag').textContent= offPeak ? 'Next dawn — previewed with this city’s current conditions.' : (win.total<35?'Weak dawn window for this pool (longitude gap).':'');
+    const ladder=document.getElementById('ladder');
+    ladder.innerHTML=STRATA_DEFS.map(d=>{
+      const on=asm.present[d.key];
+      const a=on?asm.anchors.find(x=>x.key===d.key):null;
+      const sw=a?hex(applyTreatmentRgb(a,tr)):'#1a1a1e';
+      return `<div class="ladder-item ${on?'on':'off'}"><span class="sw" style="background:${sw}"></span><span class="lbl">${d.label}</span><span class="rule">${d.rule}</span></div>`;
+    }).join('');
+    const strip=document.getElementById('stop-strip'); strip.innerHTML='';
+    buildStops(win.alt,atm,tr,Math.min(N,40)).forEach((s,i,arr)=>{ strip.innerHTML+=`<div style="width:${100/arr.length}%;background:${s.color}"></div>`; });
+  }
+
+  // leaderboard — always; winner highlighted only when there is a real dawn; dusk cities flagged
+  const lb=document.getElementById('leaderboard');
+  lb.innerHTML=rows.slice(0,10).map(r=>{
+    const isWin=!offPeak && r.city.name===win.city.name;
+    const cls=['lb-row',(isWin?'winner':''),(state.lockedCity===r.city.name?'locked':'')].join(' ');
+    const tag = !r.rising && r.alt>-9 && r.alt<12 ? ' · dusk' : (r.city.financial?'':' · scenic');
+    return `<div class="${cls}" data-city="${r.city.name}">
+      <div class="lb-name"><span class="nm">${r.city.name}</span> <span class="alt">${fmtAlt(r.alt)}${tag}</span></div>
+      <div class="lb-strata">${r.strata}▒</div><div class="lb-score"><b>${r.total.toFixed(0)}</b></div></div>`;
+  }).join('');
+  lb.querySelectorAll('.lb-row').forEach(el=>el.addEventListener('click',()=>{ if(state.uiMode!=='override')return; state.lockedCity=(state.lockedCity===el.dataset.city)?null:el.dataset.city; render(); }));
+
+  if(!state.atmOverride && !offPeak){
+    document.getElementById('cloud-val').textContent=atm.cloud+'%';
+    document.getElementById('humidity-val').textContent=atm.humidity+'%';
+    document.getElementById('visibility-val').textContent=atm.visibility+' km';
+    document.getElementById('aqi-val').textContent=atm.aqi;
+  }
+  document.getElementById('time-val').textContent=state.liveMode?date.toISOString().slice(11,16)+' (live)':fmtTime(state.timeMinutes);
+  document.getElementById('stops-note').textContent=N;
+  // live/mock indicators
+  const lbB=document.getElementById('lb-badge');
+  lbB.textContent=weatherCache.live?'live weather':'mock weather';
+  lbB.className=weatherCache.live?'badge real':'badge mock';
+  document.getElementById('reroll-btn').textContent=weatherCache.live?'↻ Refresh live weather':'↻ Reroll mock weather';
+}
+// swatch colour for ladder = treated anchor colour
+function applyTreatmentRgb(a,tr){ const [L,C,H]=applyTreatment(a.L,a.C,a.H,tr); return oklchToRgb(L,C,H); }
+
+// ============================================================
+//  SVG EXPORT — unique id, dense stops
+// ============================================================
+function buildSVG(w=1200,h=1600){
+  const stops = (window.PALETTE_IDX!=null)
+    ? buildStopsFromPalette(PALETTES[window.PALETTE_IDX], {palette:'auto', vibrance:1, warmth:0, contrast:0}, state.stops)
+    : buildStops(lastAlt, lastAtm, state.treatment, state.stops);
+  const id='reveille_dawn_'+Date.now().toString(36);
+  const xml=stops.map(s=>`    <stop offset="${(s.pos/100).toFixed(4)}" stop-color="${s.color}"/>`).join('\n');
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
+  <defs>
+    <linearGradient id="${id}" x1="0" y1="0" x2="0" y2="${h}" gradientUnits="userSpaceOnUse">
+${xml}
+    </linearGradient>
+  </defs>
+  <rect width="${w}" height="${h}" fill="url(#${id})"/>
+</svg>`;
+}
+
+// ============================================================
+//  UI
+// ============================================================
+// ============================================================
+//  LANDING HERO ENGINE — ring of 24 cities + focal readout
+// ============================================================
+const HERO = {
+  ringItems: [], ringRadius: 510, angularSpacing: 8,
+  turn: 0,               // monotonic step counter; drum rotation = turn * angularSpacing
+  lastFocalIdx: null,
+  firstRender: true,
+  overrideFocalIdx: null,
+  busy: false            // true while a drum turn is playing
+};
+const HERO_SPIN_MS = 900;    // drum rotation duration; opacity uses the same figure
+
+// Signed cascade offset in the range -12..11, correcting JS's negative modulo.
+function heroOffset(delta){
+  const m = ((delta % 24) + 24) % 24;
+  return m > 11 ? m - 24 : m;
+}
+
+function buildHeroRing(){
+  const ring = document.getElementById('hero-ring');
+  ring.innerHTML = '';
+  HERO.ringItems = CASCADE.map((cityName, i) => {
+    const span = document.createElement('span');
+    span.className = 'hero-ring-item no-anim';
+    span.textContent = cityName;
+    span.dataset.idx = i;
+    ring.appendChild(span);
+    return span;
+  });
+}
+
+function layoutHeroRing(){
+  const stage = document.getElementById('stage');
+  const W = stage.clientWidth, H = stage.clientHeight;
+  const ring = document.getElementById('hero-ring');
+  // The centre row is anchored so the focal city's LEFT edge always lands on W/2,
+  // regardless of how long the city name or the label is. That keeps the drum's
+  // pivot fixed: the ring never shifts sideways when the city changes.
+  ring.style.left = (W/2 - HERO.ringRadius).toFixed(1) + 'px';
+  ring.style.top  = (H/2).toFixed(1) + 'px';
+}
+
+// Pin every city to its slot on the drum. Slots only ever change for cities on the
+// far side of the ring (invisible), so re-pinning is never seen.
+function pinRingItems(focalIdx){
+  const S = HERO.angularSpacing, R = HERO.ringRadius;
+  HERO.ringItems.forEach((item, i) => {
+    const off = heroOffset(i - focalIdx);
+    const slot = HERO.turn + off;
+    if(item.dataset.slot !== String(slot)){
+      const a = -slot * S;                     // in-drum angle, fixed once pinned
+      const ar = a * Math.PI / 180;
+      item.style.left = (R * Math.cos(ar)).toFixed(2) + 'px';
+      item.style.top  = (R * Math.sin(ar)).toFixed(2) + 'px';
+      item.style.transform = `rotate(${a.toFixed(2)}deg) translate(0, -50%)`;
+      item.dataset.slot = String(slot);
+    }
+    const dist = Math.abs(off);
+    // Focal city rides the drum at full white; every other city sits at 30%.
+    // Cities 10+ slots away are far outside the viewport, so switching them off
+    // there is never seen and keeps the wrap-around re-pin invisible.
+    const op = (i === focalIdx) ? 1 : (dist >= 10 ? 0 : 0.30);
+    item.dataset.targetOpacity = op.toFixed(2);
+  });
+}
+
+function spinDrum(){
+  document.getElementById('hero-ring').style.transform =
+    `rotate(${(HERO.turn * HERO.angularSpacing).toFixed(2)}deg)`;
+}
+
+function applyRingOpacity(){
+  HERO.ringItems.forEach(item => { item.style.opacity = item.dataset.targetOpacity || '0'; });
+}
+
+function heroLabelFor(city){
+  return city.name === 'Honolulu' ? 'Standing Watch' : 'First Light';
+}
+
+// The clock hangs off the right edge of the focal city name, so its x depends on
+// how wide that name happens to be. offsetWidth is the untransformed layout width,
+// so it stays correct even while the drum is mid-rotation.
+function writeHeroTime(date, focalCity, focalIdx){
+  const stage = document.getElementById('stage');
+  const W = stage.clientWidth, H = stage.clientHeight;
+  const focalItem = HERO.ringItems[focalIdx];
+  const el = document.getElementById('hero-time');
+  const raw = date.toLocaleTimeString('en-US',{timeZone:focalCity.tz,hour:'numeric',minute:'2-digit',hour12:true})
+                  .toLowerCase().replace(/\s+/g,' ');
+  el.innerHTML = ', ' + raw.replace(':','<span class="colon-blink">:</span>');
+  el.style.left = (W/2 + (focalItem ? focalItem.offsetWidth : 0)).toFixed(1) + 'px';
+  el.style.top  = (H/2).toFixed(1) + 'px';
+}
+
+function updateLandingHero(date, focalCity){
+  const focalIdx = CASCADE.indexOf(focalCity.name);
+  const stage = document.getElementById('stage');
+  const ring = document.getElementById('hero-ring');
+  const timeEl = document.getElementById('hero-time');
+  const labelEl = document.getElementById('hero-label');
+  layoutHeroRing();
+
+  // ---- First paint: pin the drum, then reveal outward from the focal city ----
+  if(HERO.firstRender){
+    HERO.firstRender = false;
+    HERO.turn = 0;
+    HERO.lastFocalIdx = focalIdx;
+    ring.classList.remove('spin');
+    pinRingItems(focalIdx);
+    spinDrum();
+    labelEl.textContent = heroLabelFor(focalCity);
+    writeHeroTime(date, focalCity, focalIdx);
+    requestAnimationFrame(()=>{
+      stage.classList.add('hero-ready');                 // label, icon and clock fade in
+      HERO.ringItems.forEach((item, i) => {
+        const dist = Math.abs(heroOffset(i - focalIdx));
+        item.style.transitionDelay = `${380 + dist * 55}ms`;
+        item.classList.remove('no-anim');
+      });
+      applyRingOpacity();
+      setTimeout(()=>{
+        HERO.ringItems.forEach(item => { item.style.transitionDelay = ''; });
+        ring.classList.add('spin');                      // from now on the drum animates
+      }, 380 + 9 * 55 + 900);
+    });
+    return;
+  }
+
+  // ---- Focal unchanged: just refresh the clock ----
+  if(focalIdx === HERO.lastFocalIdx){
+    if(!HERO.busy) writeHeroTime(date, focalCity, focalIdx);
+    return;
+  }
+
+  // ---- Focal advanced: one rigid drum turn ----
+  if(HERO.busy) return;
+  HERO.busy = true;
+  ring.classList.add('spin');                            // armed even if the intro is still running
+  const step = heroOffset(focalIdx - HERO.lastFocalIdx);
+  HERO.lastFocalIdx = focalIdx;
+  HERO.turn += step;
+
+  // The clock is the only element that leaves. It has to re-anchor to a city name
+  // of a different width, and there is no honest way to slide it there.
+  timeEl.style.opacity = '0';
+
+  // The label holds still unless the wording itself changes, which only happens
+  // when the watch passes to or from Honolulu.
+  const nextLabel = heroLabelFor(focalCity);
+  if(labelEl.textContent !== nextLabel){
+    labelEl.style.opacity = '0';
+    setTimeout(()=>{ labelEl.textContent = nextLabel; labelEl.style.opacity = '1'; }, HERO_SPIN_MS / 2);
+  }
+
+  // One rigid turn: the whole list travels down together, the outgoing city dims
+  // 100 → 30 on the way to the slot below, the incoming one brightens 30 → 100.
+  pinRingItems(focalIdx);
+  spinDrum();
+  applyRingOpacity();
+
+  setTimeout(()=>{
+    writeHeroTime(date, focalCity, focalIdx);
+    timeEl.style.opacity = '1';
+    HERO.busy = false;
+  }, HERO_SPIN_MS);
+}
+
+// Re-layout on window resize
+window.addEventListener('resize', ()=>{
+  if(state.uiMode === 'landing-hero') render();
+});
+
+// ============================================================
+//  EXPORT STANDALONE HTML — for developer to integrate on site
+// ============================================================
+function exportLandingHeroHTML(){
+  const doc = document.documentElement.cloneNode(true);
+
+  // Remove developer-only elements
+  const panel = doc.querySelector('#panel'); if(panel) panel.remove();
+  const modeSeg = doc.querySelector('#uimode-seg'); if(modeSeg) modeSeg.remove();
+  const info = doc.querySelector('.info'); if(info) info.remove();
+  const badge = doc.querySelector('#cmyk-badge'); if(badge) badge.remove();
+  const badgeTr = doc.querySelector('#treatment-badge'); if(badgeTr) badgeTr.remove();
+  const ladder = doc.querySelector('#ladder'); if(ladder) ladder.remove();
+  const strip = doc.querySelector('#stopstrip-container'); if(strip) strip.remove();
+
+  // Force stage to fill viewport
+  const stage = doc.querySelector('#stage');
+  if(stage){
+    stage.classList.add('landing-hero-mode');
+    stage.setAttribute('style','position:fixed;inset:0;width:100vw;height:100vh;');
+  }
+
+  // Pre-select landing-hero mode on load
+  const scr = doc.createElement('script');
+  scr.textContent = `
+window.addEventListener('DOMContentLoaded', ()=>{
+  if(typeof applyUiMode === 'function'){ applyUiMode('landing-hero'); }
+  if(typeof buildHeroRing === 'function'){ buildHeroRing(); }
+  if(typeof render === 'function'){ render(); }
+  // Auto-refresh every 60s to keep focal + gradient current
+  setInterval(()=>{
+    if(typeof fetchWeatherAll === 'function'){ fetchWeatherAll().then(()=>render()).catch(()=>render()); }
+    else if(typeof render === 'function'){ render(); }
+  }, 60000);
+});`;
+  doc.querySelector('body').appendChild(scr);
+
+  // Documentation header
+  const docs = `<!--
+================================================================
+REVEILLE · LANDING HERO (self-contained snapshot)
+================================================================
+WHAT THIS IS
+This file renders the Reveille landing hero. The sky background is a live
+astronomical dawn gradient over one of 24 financial capitals plus Honolulu.
+The centre row names the focal city, the local time there, and the label
+"First light" for financial hours or "Standing watch" during the pacific
+window when no market is open. The ring of city names on the right shows
+the rest of the cascade with the focal city hidden because the centre row
+already names it.
+
+HOW THE FOCAL CITY IS CHOSEN
+Every render the code walks all 24 cities, computes the sun's altitude at
+each, and picks the one closest to peak dawn (altitude near 0.5 degrees
+while the sun is rising). This runs client-side using a solar position
+model plus each city's fixed coordinates. No server needed for the
+selection itself.
+
+WHY HIGH CLOUD ONLY
+Reveille takes the view from above, above the daily noise of markets. The
+sky physics uses cloud_cover_high from Open-Meteo which describes cirrus
+and thin high-altitude cover only. Low fog and mid stratus are ignored.
+The visual result is what dawn looks like from a jet at altitude, cleaner
+and more consistent than a street-level camera would show.
+
+LIVE WEATHER
+On load and every sixty seconds the code fetches current weather for all
+24 cities from Open-Meteo forecast plus air-quality endpoints, then feeds
+each city's atmosphere into the gradient physics. If the network fails
+the profiles baked into CITIES act as a fallback so the visual is never
+blank.
+
+FONT REPLACEMENT
+The @font-face rule in this file embeds Season VF-TRIAL as base64. When
+the licensed production woff2 arrives, replace the two data URLs inside
+@font-face with the production file path or CDN URL. Keep the family name
+exactly Season VF-TRIAL so no other CSS needs to change, or rename it and
+update the font-family declarations that reference it.
+
+WHAT TO CUT FOR PRODUCTION
+The file inherits helper code from the design tool: curated palettes,
+loop playback, gradient construction utilities. Nothing extra runs in
+Landing Hero mode so removing them is optional. If you strip the file
+keep sunGeom, the CITIES array, CASCADE, assembleAnchors, buildStops,
+oklchToRgb, hex, fetchWeatherAll, updateLandingHero, render, and the
+DOMContentLoaded initializer at the end.
+
+STANDING WATCH
+Honolulu covers the roughly three-hour pacific window between San
+Francisco's sunrise and Tokyo's next-day sunrise when no financial market
+is at dawn. Its label is Standing watch rather than First light. The
+phrase is not standard finance jargon but comes directly from Reveille's
+brand voice about taking the watch at first light.
+
+================================================================
+-->`;
+
+  const raw = '<!DOCTYPE html>\n' + docs + '\n' + doc.outerHTML;
+  const blob = new Blob([raw], {type:'text/html;charset=utf-8'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'reveille-first-light.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+}
+
+function bind(){
+  document.querySelectorAll('#uimode-seg button').forEach(b=>b.addEventListener('click',()=>applyUiMode(b.dataset.uimode)));
+  const t=document.getElementById('time-slider'); const now=new Date();
+  state.timeMinutes=now.getUTCHours()*60+now.getUTCMinutes(); t.value=state.timeMinutes;
+  t.addEventListener('input',e=>{ state.timeMinutes=+e.target.value;
+    if(state.liveMode){ state.liveMode=false; document.getElementById('live-toggle').classList.remove('on'); if(liveTimer){clearInterval(liveTimer);liveTimer=null;} } render(); });
+  document.getElementById('live-toggle').addEventListener('click',e=>{ state.liveMode=!state.liveMode; e.currentTarget.classList.toggle('on',state.liveMode);
+    if(state.liveMode){ liveTimer=setInterval(()=>{ if(window.getSelection&&String(window.getSelection()))return; const d=new Date();state.timeMinutes=d.getUTCHours()*60+d.getUTCMinutes();t.value=state.timeMinutes;render();},5000); }
+    else if(liveTimer){clearInterval(liveTimer);liveTimer=null;} render(); });
+
+  document.querySelectorAll('#pool-seg button').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('#pool-seg button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); state.lockedCity=null; render(); }));
+
+  [['w-alt','alt'],['w-cloud','cloud'],['w-aero','aero'],['w-hum','hum'],['w-vis','vis']].forEach(([id,key])=>{
+    const el=document.getElementById(id),v=document.getElementById(id+'-val');
+    el.addEventListener('input',e=>{ state.weights[key]=+e.target.value; v.textContent=(+e.target.value).toFixed(1); render(); }); });
+
+  document.getElementById('reroll-btn').addEventListener('click',()=>{ if(weatherCache.live){fetchWeatherAll();}else{state.mockSeed++;render();} });
+  document.getElementById('auto-btn').addEventListener('click',()=>{ state.lockedCity=null; render(); });
+
+  const atmT=document.getElementById('atm-toggle'), atmS=['cloud','humidity','visibility','aqi'];
+  atmT.addEventListener('click',()=>{ state.atmOverride=!state.atmOverride; atmT.classList.toggle('on',state.atmOverride);
+    atmS.forEach(k=>document.getElementById(k+'-slider').disabled=!state.atmOverride);
+    if(state.atmOverride&&lastAtm){ state.ovr={...lastAtm};
+      document.getElementById('cloud-slider').value=lastAtm.cloud; document.getElementById('humidity-slider').value=lastAtm.humidity;
+      document.getElementById('visibility-slider').value=lastAtm.visibility; document.getElementById('aqi-slider').value=lastAtm.aqi; }
+    render(); });
+  atmS.forEach(k=>{ const el=document.getElementById(k+'-slider'),v=document.getElementById(k+'-val');
+    const key=k, fmt=k==='visibility'?x=>x+' km':k==='aqi'?x=>x:x=>x+'%';
+    el.addEventListener('input',e=>{ state.ovr[key]=+e.target.value; v.textContent=fmt(+e.target.value); if(state.atmOverride)render(); }); });
+
+  document.querySelectorAll('#palette-seg button').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('#palette-seg button').forEach(x=>x.classList.remove('active')); b.classList.add('active'); state.treatment.palette=b.dataset.palette; render(); }));
+  [['vib-slider','vibrance','vib-val',x=>x.toFixed(2)],['warm-slider','warmth','warm-val',x=>x.toFixed(1)],['con-slider','contrast','con-val',x=>x.toFixed(2)]].forEach(([id,key,vid,f])=>{
+    const el=document.getElementById(id),v=document.getElementById(vid);
+    el.addEventListener('input',e=>{ state.treatment[key]=+e.target.value; v.textContent=f(+e.target.value); render(); }); });
+  document.getElementById('grain-slider').addEventListener('input',e=>{ state.grain=+e.target.value; document.getElementById('grain-val').textContent=state.grain+'%'; render(); });
+  document.getElementById('stops-slider').addEventListener('input',e=>{ state.stops=+e.target.value; document.getElementById('stops-val').textContent=state.stops; render(); });
+
+  const copyBtn=document.getElementById('copy-svg-btn');
+  copyBtn.addEventListener('click',async()=>{ try{ await navigator.clipboard.writeText(buildSVG()); copyBtn.classList.add('copied'); copyBtn.textContent='Copied ✓ — paste in Figma';
+    setTimeout(()=>{copyBtn.classList.remove('copied');copyBtn.textContent='Copy SVG (paste into Figma)';},1600);
+  }catch(err){ copyBtn.textContent='Copy failed — use Download'; setTimeout(()=>copyBtn.textContent='Copy SVG (paste into Figma)',1800); } });
+  document.getElementById('download-svg-btn').addEventListener('click',()=>{
+    const blob=new Blob([buildSVG()],{type:'image/svg+xml'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download=`reveille-dawn_${lastWinner?lastWinner.city.name.replace(/\s+/g,'-'):'gradient'}.svg`; a.click(); URL.revokeObjectURL(url); });
+}
+// Master mode: Real = live API + auto best dawn (manual overrides locked); Override = manual play.
+function applyUiMode(mode){
+  state.uiMode=mode;
+  document.querySelectorAll('#uimode-seg button').forEach(b=>b.classList.toggle('active', b.dataset.uimode===mode));
+
+  const isCurated = mode==='curated';
+  const isLanding = mode==='landing-hero';
+  // Show / hide whole groups
+  ['time-group','atm-group','weights-group','treatment-group','loop-group','construction-group','leaderboard-group'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.style.display = (isCurated || isLanding) ? 'none' : '';
+  });
+  const pg=document.getElementById('palette-group'); if(pg) pg.style.display = isCurated ? '' : 'none';
+  const eg=document.getElementById('export-group'); if(eg) eg.style.display = isLanding ? 'none' : '';
+  const lhg=document.getElementById('landing-hero-group'); if(lhg) lhg.style.display = isLanding ? '' : 'none';
+  if(!isCurated){ window.PALETTE_IDX = null; }   // leaving curated → drop palette so physics resumes
+
+  // Landing overlay toggle on stage
+  document.getElementById('stage').classList.toggle('landing-hero-mode', isLanding);
+
+  // Stop density defaults per mode: Brand=16, physics=64, landing=64
+  {
+    const desired = isCurated ? 16 : 64;
+    state.stops = desired;
+    const sl = document.getElementById('stops-slider'); if(sl) sl.value = desired;
+    const sv = document.getElementById('stops-val');    if(sv) sv.textContent = desired;
+    const sn = document.getElementById('stops-note');   if(sn) sn.textContent = desired;
+  }
+
+  if(isCurated && window.PALETTE_IDX == null){
+    const grid = document.getElementById('palette-grid');
+    if(grid && grid.children.length){ grid.children[0].click(); }
+  }
+
+  const lock = mode==='real' || mode==='landing-hero';
+  document.querySelectorAll('.play-control').forEach(g=>g.classList.toggle('locked', lock));
+  if(lock){
+    state.lockedCity=null;
+    if(state.atmOverride){ state.atmOverride=false; document.getElementById('atm-toggle').classList.remove('on');
+      ['cloud','humidity','visibility','aqi'].forEach(k=>document.getElementById(k+'-slider').disabled=true); }
+    if(!state.liveMode){ state.liveMode=true; document.getElementById('live-toggle').classList.add('on');
+      if(!liveTimer) liveTimer=setInterval(()=>{ if(window.getSelection&&String(window.getSelection()))return; const d=new Date();state.timeMinutes=d.getUTCHours()*60+d.getUTCMinutes();document.getElementById('time-slider').value=state.timeMinutes;render();},5000); }
+  }
+  render();
+}
+buildHeroRing(); bind(); applyUiMode('landing-hero');
+// real-time clock with blinking colon: "5:47am IST · 19.08°N 72.88°E"
+setInterval(()=>{
+  if(!lastWinner)return;
+  const preview=lastPreview!=null;
+  const now=preview?lastPreview:(state.liveMode?new Date():getActiveDate());
+  const c=lastWinner.city;
+  const t=now.toLocaleTimeString('en-US',{timeZone:c.tz,hour:'numeric',minute:'2-digit',hour12:true}).replace(' ','').toLowerCase(); // "5:47am"
+  const [hh,rest]=t.split(':');
+  const tz=tzAbbrev(now,c.tz);
+  const coords=`${Math.abs(c.lat).toFixed(2)}°${c.lat>=0?'N':'S'} ${Math.abs(c.lng).toFixed(2)}°${c.lng>=0?'E':'W'}`;
+  const on = preview ? 1 : (Date.now()%1000<500 ? 1 : 0);     // blink the colon on real half-seconds
+  document.getElementById('info-time').innerHTML=`${hh}<span class="colon" style="opacity:${on}">:</span>${rest} ${tz}`;
+  document.getElementById('info-coords').textContent=coords;
+},250);
+// fetch live weather (falls back to mock on error)
+fetchWeatherAll();
+setInterval(fetchWeatherAll, 600000); // refresh every 10 min
+
+
+// =============================================================
+//  LOOP EXPORT — N captured gradients, cross-faded in OKLCH
+//  The user sees the same gradients the 24h scrub shows, just
+//  smoothly blended between them. Few + slow = morphing skies,
+//  many + fast = rapid time-lapse.
+// =============================================================
+const loopOpts = { fps:30, durationSec:12, resShortSide:1080, aspect:'16:9',
+                   gradientCount:50,
+                   get frames(){ return this.fps * this.durationSec; } };
+
+function loopDims(){
+  const [aw,ah] = loopOpts.aspect.split(':').map(Number);
+  const s = loopOpts.resShortSide;
+  const isLandscape = aw >= ah;
+  return { w: isLandscape ? Math.round(s*aw/ah) : s,
+           h: isLandscape ? s : Math.round(s*ah/aw) };
+}
+function updateLoopReadout(){
+  document.getElementById('loop-gc-val').textContent  = loopOpts.gradientCount;
+  document.getElementById('loop-fps-val').textContent = loopOpts.fps + ' fps';
+  document.getElementById('loop-dur-val').textContent = loopOpts.durationSec + ' s';
+  document.getElementById('loop-frames-val').textContent = loopOpts.frames;
+  document.getElementById('loop-ar-val').textContent  = loopOpts.aspect;
+  document.getElementById('loop-res-val').textContent = loopOpts.resShortSide;
+  const {w,h}=loopDims();
+  document.getElementById('loop-size-val').textContent = `${w}×${h}`;
+}
+document.getElementById('loop-gc').addEventListener('input', e=>{
+  loopOpts.gradientCount=+e.target.value; updateLoopReadout(); capturePresets();
+});
+document.querySelectorAll('#loop-fps-seg button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#loop-fps-seg button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  loopOpts.fps=+b.dataset.fps; updateLoopReadout();
+}));
+document.querySelectorAll('#loop-ar-seg button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#loop-ar-seg button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  loopOpts.aspect=b.dataset.ar; updateLoopReadout();
+}));
+document.querySelectorAll('#loop-res-seg button').forEach(b=>b.addEventListener('click',()=>{
+  document.querySelectorAll('#loop-res-seg button').forEach(x=>x.classList.remove('active')); b.classList.add('active');
+  loopOpts.resShortSide=+b.dataset.res; updateLoopReadout();
+}));
+document.getElementById('loop-dur').addEventListener('input', e=>{
+  loopOpts.durationSec=+e.target.value; updateLoopReadout();
+});
+
+// Capture N gradient snapshots evenly distributed across 24h.
+// Each snapshot is the actual gradient at that minute (same as scrub),
+// stored as LCH stops for perceptual blending.
+let presets = [];
+function captureSnapshotAt(date){
+  const rows = rankCities(date);
+  let win = rows[0];
+  const offPeak = !win.eligible;
+  const DAWN_ALT = 0.5;
+  if(offPeak){
+    const nd = nextDawn(date);
+    const c  = nd ? nd.city : null;
+    win = (c && rows.find(r=>r.city.name===c.name)) ||
+          rows.filter(r=>r.rising).sort((a,b)=>Math.abs(a.alt-0.5)-Math.abs(b.alt-0.5))[0] || rows[0];
+  }
+  const renderAlt = offPeak ? DAWN_ALT : win.alt;
+  return buildStopsLCH(renderAlt, win.atm, state.treatment, state.stops);
+}
+function capturePresets(){
+  const N = loopOpts.gradientCount;
+  const base = new Date(); base.setUTCHours(0,0,0,0);
+  presets = [];
+  for(let i=0;i<N;i++){
+    const t = new Date(base.getTime() + (i/N) * 86400 * 1000);
+    presets.push(captureSnapshotAt(t));
+  }
+}
+capturePresets();
+// Refresh presets when live weather updates land
+setInterval(capturePresets, 600000);
+
+// Sample the loop at phase ∈ [0,1). Cross-fades between adjacent presets in OKLCH.
+function loopStopsAt(phase){
+  const N = presets.length;
+  const j = phase * N;                      // continuous slot index
+  const a = Math.floor(j) % N;
+  const b = (a + 1) % N;
+  const f = smooth(j - Math.floor(j));      // smoothstep eases the cross-fade
+  const A = presets[a], B = presets[b];
+  const out = [];
+  for(let i=0;i<A.length;i++){
+    const L = lerp(A[i].L, B[i].L, f);
+    const C = lerp(A[i].C, B[i].C, f);
+    const H = lerpHue(A[i].H, B[i].H, f);
+    out.push({ pos: A[i].pos, color: hex(oklchToRgb(L, C, H)) });
+  }
+  return out;
+}
+function stopsToCSS(stops){ return 'linear-gradient(to bottom,'+stops.map(s=>`${s.color} ${s.pos.toFixed(2)}%`).join(',')+')'; }
+
+// ----- Play on main screen -----
+window.LOOP = { playing:false, raf:0, t0:0 };
+function lockPanelForLoop(lock){
+  ['time-group','atm-group','weights-group','treatment-group'].forEach(id=>{
+    const el=document.getElementById(id); if(el) el.classList.toggle('locked', lock);
+  });
+}
+function loopFrame(){
+  if(!window.LOOP.playing) return;
+  const phase = ((performance.now()-window.LOOP.t0)/1000 / loopOpts.durationSec) % 1;
+  document.getElementById('sky').style.background = stopsToCSS(loopStopsAt(phase));
+  window.LOOP.raf = requestAnimationFrame(loopFrame);
+}
+function startLoop(){
+  if(window.LOOP.playing) return;
+  capturePresets();
+  window.LOOP.playing = true; window.LOOP.t0 = performance.now();
+  document.getElementById('loop-play-btn').textContent = '■ Stop loop';
+  lockPanelForLoop(true);
+  loopFrame();
+}
+function stopLoop(){
+  if(!window.LOOP.playing) return;
+  window.LOOP.playing = false; cancelAnimationFrame(window.LOOP.raf);
+  document.getElementById('loop-play-btn').textContent = '▶ Play loop on main screen';
+  lockPanelForLoop(false);
+  render();
+}
+document.getElementById('loop-play-btn').addEventListener('click', ()=>window.LOOP.playing?stopLoop():startLoop());
+
+// ----- Export -----
+async function exportLoop(){
+  const btn = document.getElementById('loop-export-btn');
+  if(btn.dataset.busy==='1') return;
+  btn.dataset.busy='1'; const originalLabel=btn.textContent;
+
+  capturePresets();
+  const {w:Wpx, h:H} = loopDims();
+  const N = loopOpts.frames, dur = loopOpts.durationSec, fps = N/dur;
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Wpx; canvas.height = H;
+  const ctx = canvas.getContext('2d',{alpha:false});
+
+  const candidates = ['video/webm;codecs=vp9','video/webm;codecs=vp8','video/webm'];
+  const mime = candidates.find(m=>MediaRecorder.isTypeSupported(m));
+  if(!mime){ alert('Your browser cannot record WebM. Use Chrome.'); btn.dataset.busy=''; btn.textContent=originalLabel; return; }
+
+  const stream = canvas.captureStream(0);
+  const track = stream.getVideoTracks()[0];
+  const rec = new MediaRecorder(stream, { mimeType:mime, videoBitsPerSecond: 12_000_000 });
+  const chunks=[]; rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+  const done = new Promise(r=>rec.onstop=r);
+  rec.start();
+
+  const frameDelayMs = 1000/fps;
+  for(let i=0;i<N;i++){
+    const phase = i/N;
+    const stops = loopStopsAt(phase);
+    const grad = ctx.createLinearGradient(0,0,0,H);
+    stops.forEach(s=>grad.addColorStop(Math.max(0,Math.min(1,s.pos/100)), s.color));
+    ctx.fillStyle = grad; ctx.fillRect(0,0,Wpx,H);
+    track.requestFrame();
+    btn.textContent = `Recording… ${i+1}/${N}`;
+    await new Promise(r=>setTimeout(r, frameDelayMs));
+  }
+
+  rec.stop(); await done;
+  const blob = new Blob(chunks, { type:mime.split(';')[0] });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `reveille-dawn-loop-${Wpx}x${H}-${loopOpts.gradientCount}g-${dur}s.webm`; a.click();
+  URL.revokeObjectURL(url);
+  btn.dataset.busy=''; btn.textContent=originalLabel;
+}
+document.getElementById('loop-export-btn').addEventListener('click', exportLoop);
+const hbtn = document.getElementById('export-hero-btn');
+if(hbtn){
+  hbtn.addEventListener('click', ()=>{
+    try{ exportLandingHeroHTML(); hbtn.textContent='Exported ✓'; setTimeout(()=>hbtn.textContent='Export standalone HTML', 1800); }
+    catch(e){ console.error(e); hbtn.textContent='Export failed — see console'; }
+  });
+}
+const nextBtn = document.getElementById('hero-next-btn');
+if(nextBtn){
+  nextBtn.addEventListener('click', ()=>{
+    let current = HERO.overrideFocalIdx;
+    if(current == null){
+      // Find current live focal
+      const date = getActiveDate();
+      let bestScore = Infinity, bestIdx = 0;
+      CASCADE.forEach((cityName, i) => {
+        const c = CITIES.find(x => x.name === cityName);
+        if(!c) return;
+        const g = sunGeom(date, c.lat, c.lng);
+        const score = g.rising ? Math.abs(g.alt - 0.5) : 200 + Math.abs(g.alt - 0.5);
+        if(score < bestScore){ bestScore = score; bestIdx = i; }
+      });
+      current = bestIdx;
+    }
+    HERO.overrideFocalIdx = (current + 1) % CASCADE.length;
+    render();
+  });
+}
+const honoluluBtn = document.getElementById('hero-honolulu-btn');
+if(honoluluBtn){
+  honoluluBtn.addEventListener('click', ()=>{
+    HERO.overrideFocalIdx = CASCADE.indexOf('Honolulu');
+    render();
+  });
+}
+const resetBtn = document.getElementById('hero-reset-btn');
+if(resetBtn){
+  resetBtn.addEventListener('click', ()=>{
+    HERO.overrideFocalIdx = null;
+    render();
+  });
+}
+
+updateLoopReadout();
+
+// ----- Curated palette picker -----
+function paletteSwatchCSS(p){
+  return 'linear-gradient(to bottom,' + p.stops.map(s=>{
+    const rgb = oklchToRgb(s.L, s.C, s.H);
+    return `${hex(rgb)} ${s.pos.toFixed(0)}%`;
+  }).join(',') + ')';
+}
+(function buildPaletteGrid(){
+  const grid = document.getElementById('palette-grid');
+  PALETTES.forEach((p, i)=>{
+    const el = document.createElement('div');
+    el.style.cssText = `cursor:pointer; aspect-ratio:1/1.6; border-radius:3px; border:1px solid transparent; background:${paletteSwatchCSS(p)}; transition:border-color .12s, transform .12s;`;
+    el.title = p.name;
+    el.dataset.idx = i;
+    el.addEventListener('mouseover',()=>{ el.style.transform='scale(1.08)'; el.style.zIndex='5'; el.style.position='relative'; });
+    el.addEventListener('mouseout', ()=>{ el.style.transform='scale(1)'; el.style.zIndex=''; el.style.position=''; });
+    el.addEventListener('click', ()=>{
+      window.PALETTE_IDX = i;
+      [...grid.children].forEach(c=>c.style.borderColor='transparent');
+      el.style.borderColor = '#fff';
+      document.getElementById('palette-edit').style.display='';
+      document.getElementById('pe-reset').click();   // clear edits when switching palettes
+      render();
+    });
+    grid.appendChild(el);
+  });
+})();
+
+// Palette edit sliders — non-destructive overlay on the chosen palette
+[
+  ['pe-hue','hueShift',  v=>v+'°'],
+  ['pe-con','lContrast', v=>(+v).toFixed(2)],
+  ['pe-sat','chromaScale', v=>(+v).toFixed(2)],
+  ['pe-pos','posBias',   v=>v+'%'],
+  ['pe-l',  'lOffset',   v=>(+v).toFixed(2)]
+].forEach(([id, key, fmt])=>{
+  const el = document.getElementById(id), vv = document.getElementById(id+'-val');
+  el.addEventListener('input', e=>{
+    window.PALETTE_EDIT[key] = parseFloat(e.target.value);
+    vv.textContent = fmt(e.target.value); render();
+  });
+});
+document.getElementById('pe-reset').addEventListener('click',()=>{
+  window.PALETTE_EDIT = { hueShift:0, lContrast:1.0, chromaScale:1.0, posBias:0, lOffset:0 };
+  document.getElementById('pe-hue').value=0; document.getElementById('pe-hue-val').textContent='0°';
+  document.getElementById('pe-con').value=1; document.getElementById('pe-con-val').textContent='1.00';
+  document.getElementById('pe-sat').value=1; document.getElementById('pe-sat-val').textContent='1.00';
+  document.getElementById('pe-pos').value=0; document.getElementById('pe-pos-val').textContent='0%';
+  document.getElementById('pe-l').value=0;   document.getElementById('pe-l-val').textContent='0';
+  render();
+});
+</script>
+</body>
+</html>
